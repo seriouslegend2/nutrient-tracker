@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nutrient Tracker - Current Product and Deferred Plan</title>
+<style>
+:root { color-scheme: dark; --bg:#0c0e11; --card:#151a21; --line:#2b3440; --tx:#e8ebef; --muted:#a7b1bf; --accent:#7dd3a0; --warn:#e8b866; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--tx); font:15px/1.62 system-ui,-apple-system,"Segoe UI",sans-serif; }
+main { width:min(1120px,calc(100% - 32px)); margin:auto; padding:48px 0 96px; }
+h1 { margin:0; font-size:clamp(2rem,5vw,3.2rem); line-height:1.05; }
+h2 { margin:48px 0 12px; padding-top:16px; border-top:1px solid var(--line); }
+h3 { margin:24px 0 8px; }
+p,li,td { color:var(--muted); }
+code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+code { color:#d7f4e1; }
+pre { overflow:auto; padding:18px; border:1px solid var(--line); border-radius:10px; background:#080a0d; color:#d5dde7; }
+table { width:100%; border-collapse:collapse; }
+th,td { padding:11px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:.07em; }
+.meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:18px; }
+.pill { border:1px solid var(--line); border-radius:999px; padding:5px 10px; color:var(--muted); font:12px ui-monospace,monospace; }
+.card { margin:16px 0; padding:18px 20px; border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:10px; background:var(--card); }
+.deferred { border-left-color:var(--warn); }
+.status { color:var(--accent); font-weight:700; }
+.future { color:var(--warn); font-weight:700; }
+@media (max-width:700px) { main { padding-top:28px; } th,td { padding:9px 7px; } }
+</style>
+</head>
+<body><main>
+<header>
+  <h1>Current Product and Deferred Plan</h1>
+  <p>This is a post-remediation scope record. It separates what exists in the repository from intentional backlog; it is not a promise that every original design idea shipped.</p>
+  <div class="meta"><span class="pill">reconciled 2026-08-16</span><span class="pill">12 migrations</span><span class="pill">68 backend tests</span><span class="pill">2 implemented agents</span></div>
+</header>
+
+<section>
+<h2>Product Boundary</h2>
+<div class="card">
+  <p><span class="status">IMPLEMENTED</span> A multi-user nutrition tracker with onboarding, manual and assisted meal logging, safety-aware goals, hydration, reports, a conversational assistant, and an admin dashboard.</p>
+</div>
+<div class="card deferred">
+  <p><span class="future">DEFERRED</span> The repository is not a complete food-data platform, medical system, media archive, offline PWA, or advanced BI product. Deferred work below is deliberately excluded from the current contract.</p>
+</div>
+</section>
+
+<section>
+<h2>Implemented Architecture</h2>
+<pre>browser
+  -> Next.js 16 BFF (customer :3000 or admin :3001)
+       -> Supabase SSR auth only
+       -> signs user-specific HS256 backend bearer
+  -> FastAPI /api/v1
+       -> validates bearer and loads roles from user_roles
+       -> server-side Supabase service-role client
+  -> Postgres 17</pre>
+<p>The browser uses same-origin application routes for product data. The public Supabase URL and anon key configure email/password authentication and session handling, while the service-role credential exists only in FastAPI and the offline seed script. FastAPI's service-role calls bypass RLS, so repository user scoping and backend RBAC are the primary authorization boundary. RLS is enabled as defense in depth for non-service-role database paths.</p>
+<p>Customer signup/login and dashboard login run through server routes. If hosted email confirmation is enabled, the customer-only callback exchanges the confirmation code server-side; the sign-in-only dashboard needs no callback. The session bridge applies HTTP-only, same-site, and production-secure cookie options, and both apps implement logout. BFF-to-FastAPI bearers contain <code>user_id</code>, have no expiry claim, and are signed with matching server-only secrets in the backend and both BFFs.</p>
+<div class="card deferred"><p>A supplied service-role key was exposed and must be rotated before use. Its value must never appear in documentation or frontend configuration. Actual local environment files contain public project values and placeholders for the rotated service-role and replacement JWT secrets; checked-in examples stay generic.</p></div>
+</section>
+
+<section>
+<h2>Implemented Stack</h2>
+<table>
+<thead><tr><th>Layer</th><th>Checked-in / resolved version</th><th>Role</th></tr></thead>
+<tbody>
+<tr><td>Backend runtime</td><td>Python 3.13, FastAPI 0.141.1, Pydantic 2.13.4</td><td>API, validation, RBAC, domain orchestration</td></tr>
+<tr><td>Database client</td><td>Supabase Python 2.31.0</td><td>Server-side PostgREST/RPC access using service role</td></tr>
+<tr><td>Agents</td><td>LangChain 1.3.15, LangGraph 1.2.11, OpenAI 3.1.0</td><td>Optional chat and media extraction</td></tr>
+<tr><td>Frontends</td><td>Next.js 16.3.1, React 19.2.8, TypeScript 5.7 range</td><td>Customer application and internal dashboard</td></tr>
+<tr><td>Charts</td><td>Recharts 2.15.4</td><td>Customer nutrition and weight charts</td></tr>
+<tr><td>Database</td><td>Postgres 17 with pgvector extension available</td><td>Schema, atomic RPCs, formulas, version history, RLS</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2>Implemented Customer Product</h2>
+<table>
+<thead><tr><th>Area</th><th>Current implementation</th></tr></thead>
+<tbody>
+<tr><td>Identity</td><td>Customer email/password signup/login, optional hosted email-confirmation callback, safe continuation paths, logout, first-run onboarding gate, and app-user bootstrap migration.</td></tr>
+<tr><td>Onboarding</td><td>Required demographic/body validation, activity/diet/allergy/timing inputs, seven optional portion questions, safety disclosures, then goal preview/create or skip.</td></tr>
+<tr><td>Meals</td><td>Six meal types; date browsing; manual substring dish search; free-text fallback; exact grams or portions; provenance; edit/delete with coherent day versions.</td></tr>
+<tr><td>Portions</td><td>Meal value, user dish override, user category override, global dish, global category, then unknown. The chosen level is persisted.</td></tr>
+<tr><td>Goals</td><td>Nutrient, body-weight, item, hydration, and behaviour goals; preview; activate/deactivate; BMI/BMR/TDEE refresh; calorie/rate safety controls.</td></tr>
+<tr><td>Reports</td><td>Daily/weekly/monthly calorie and macro series, 18-micronutrient panel/watchlist, goal comparison, weight history, unknown-item counts.</td></tr>
+<tr><td>Hydration</td><td>250 ml quick logging, target progress when available, and recent daily history.</td></tr>
+<tr><td>Installability</td><td>Web manifest only; no offline service worker.</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2>Implemented AI Surface</h2>
+<p>The only implemented agent names are <code>nutrition_chat</code> and <code>media_extraction</code>.</p>
+<ul>
+  <li><code>nutrition_chat</code> has read tools for dish search, meal history, and goal status plus explicitly gated mutation tools for meals, goals, water, weight, and portions.</li>
+  <li><code>media_extraction</code> normalizes JPEG/PNG/WebP food photos, explicitly label-hinted images, supported audio, and food-diary PDFs before chat.</li>
+  <li>Ordinary image uploads use three extraction samples. Review cards expose editable mass and ranges before commit.</li>
+  <li>PDF rows become reviewable meal items. The selected confirmation date and meal type apply to the batch.</li>
+  <li>Upload bytes are transient and not persisted. Message text, structured output, metadata, and agent-run telemetry are persisted.</li>
+  <li>Without an OpenAI key, AI calls report disabled while the manual product remains usable.</li>
+</ul>
+</section>
+
+<section>
+<h2>Implemented Dashboard</h2>
+<p>The dashboard is sign-in-only: existing accounts authenticate with email/password, and new accounts are created in the customer application. The admin UI verifies the signed-in user at the BFF, checks the backend-provided admin role in the UI, and relies on FastAPI permission checks for enforcement. Dashboard access is granted by inserting the <code>admin</code> role in <code>user_roles</code> after the account has signed in once. Logout clears the local Supabase session. The dashboard provides server-paginated users and per-user overview, meals, goals, preferences, conversations, and agent-run panels. Aggregate cards cover users, recent meals, agent success/latency when runs exist, and portion-resolution mix.</p>
+<p>User search, filtering, sorting, account mutation, body-history, progress, audit, and food-database administration are not implemented.</p>
+</section>
+
+<section>
+<h2>Data And Migrations</h2>
+<p>Twelve ordered migrations define identity/profile tables, global and user dish portions, meals, goals, preferences, water logs, communications, agent runs, audits, formulas, atomic versioning RPCs, triggers, grants, and RLS. An auth trigger creates <code>app_users</code> and the customer role from <code>auth.users</code>.</p>
+<p>The migration seed supplies all 18 category defaults. The optional Python seed contains 61 curated as-entered dish rows and no demo account. It is a starter corpus, not a full national or commercial food database.</p>
+</section>
+
+<section>
+<h2>Intentionally Deferred Backlog</h2>
+<div class="card deferred">
+<ul>
+  <li>Video extraction. Video MIME types are rejected with a user-readable response.</li>
+  <li>Raw media storage, later replay, and administrator visual inspection.</li>
+  <li>Page-count and audio-duration enforcement beyond current byte limits.</li>
+  <li>Automatic nutrition-label image classification beyond explicit text/filename hints.</li>
+  <li>Ranked alias search, BM25, embeddings, and combined lexical/vector retrieval. Current search is normalized substring matching.</li>
+  <li>A large food/demo seed and a Food DB administration interface.</li>
+  <li>Advanced projections, arbitrary report-range controls, full operational analytics, and additional admin panels.</li>
+  <li>Account export, self-service account deletion, offline/service-worker behavior, and a general profile/preferences editor.</li>
+  <li>Generated OpenAPI client types. Frontends currently maintain local interfaces.</li>
+  <li>Browser automation against hosted Supabase email authentication. Focused frontend unit suites are implemented.</li>
+</ul>
+</div>
+</section>
+
+<section>
+<h2>Acceptance And Verification Plan</h2>
+<ol>
+  <li>Keep Ruff, configured mypy, import-linter, backend tests, frontend typechecks, and frontend isolation green in CI.</li>
+  <li>Require pgvector/Postgres in CI, apply all migrations from empty, and fail if integration tests skip.</li>
+  <li>Before deployment, rotate the exposed service-role key, create a new shared JWT secret, link a disposable hosted Supabase project, and verify migration push, PostgREST, auth bootstrap, and real policy behavior.</li>
+  <li>Enable Supabase Email authentication and drive customer signup/signin, optional email confirmation, first-run onboarding, logout, dashboard sign-in, role denial, and admin-role access. Allow <code>http://localhost:3000/auth/callback</code> only when confirmations are enabled; the dashboard needs no callback.</li>
+  <li>With an OpenAI credential, exercise live chat, photo, label-hinted photo, audio, and PDF paths, including failed and confirmed drafts.</li>
+</ol>
+<p>Steps 3-5 remain external runtime verification, not completed product evidence. Local evidence is 12 migrations, 68 backend tests, 27 customer auth tests, 22 dashboard tests, Next.js 16.3.1 in both lockfiles, and zero production vulnerabilities from both frontend audits.</p>
+</section>
+</main></body>
+</html>

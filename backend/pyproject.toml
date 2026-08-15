@@ -1,0 +1,115 @@
+[project]
+name = "nutrient-tracker-backend"
+version = "0.1.0"
+description = "Personal calorie tracker - API. The only thing that talks to Supabase."
+requires-python = ">=3.13"
+
+dependencies = [
+    "fastapi>=0.115.12",
+    "uvicorn[standard]>=0.34.2",
+    "pydantic>=2.11.7",
+    "pydantic-settings>=2.9.1",
+    "supabase>=2.17.0",
+    "httpx>=0.28.1",
+    "pyjwt[crypto]>=2.10.1",
+    "loguru>=0.7.3",
+    "python-multipart>=0.0.20",
+    "redis>=5.0.1",
+    "scalar-fastapi>=1.0.3",
+    "langchain>=1.0.0",
+    "langchain-openai>=1.0.0",
+    "langgraph>=1.0.0",
+    "openai>=1.0.0",
+    "typing-extensions>=4.12.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.12.5",
+    "mypy>=1.14.0",
+    "import-linter>=2.1",
+]
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "unit: pure logic, no I/O",
+    "integration: needs a real database",
+]
+
+# --- Ruff: configured, not stock defaults (KookarCore has no config at all) ---
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "SIM", "RUF", "ASYNC"]
+ignore = [
+    "E501",   # line length is handled by the formatter
+    "B008",   # FastAPI Depends() in defaults is the whole idiom
+    "A003",   # shadowing builtins as model field names is fine
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+# --- mypy: strict where it pays, lenient at the edges ---
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "app.core.*",
+    "app.domain.admin.*",
+    "app.domain.water.*",
+    "app.services.db_results",
+    "app.services.identity",
+]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["supabase.*", "postgrest.*"]
+ignore_missing_imports = true
+
+# --- Layering, enforced. A router that imports the DB client fails the build. ---
+[tool.importlinter]
+root_package = "app"
+
+[[tool.importlinter.contracts]]
+name = "Routers never touch the database directly"
+type = "forbidden"
+source_modules = ["app.api"]
+forbidden_modules = ["app.services.supabase"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Core does not depend on application or domain layers"
+type = "forbidden"
+source_modules = ["app.core"]
+forbidden_modules = ["app.api", "app.domain", "app.agents"]
+
+[[tool.importlinter.contracts]]
+name = "Domain code does not depend on API delivery"
+type = "forbidden"
+source_modules = ["app.domain"]
+forbidden_modules = ["app.api"]
+
+[[tool.importlinter.contracts]]
+name = "Database services do not depend on API delivery"
+type = "forbidden"
+source_modules = ["app.services"]
+forbidden_modules = ["app.api"]

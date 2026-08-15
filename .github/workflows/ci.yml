@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  migrations:
+    name: Migration guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Filename convention
+        run: |
+          fail=0
+          for f in supabase/migrations/*.sql; do
+            base=$(basename "$f")
+            if ! [[ "$base" =~ ^[0-9]{14}_[a-z0-9_]+\.sql$ ]]; then
+              echo "BAD NAME: $base"; fail=1
+            fi
+          done
+          dupes=$(ls supabase/migrations/*.sql | xargs -n1 basename | cut -c1-14 | sort | uniq -d)
+          [ -n "$dupes" ] && { echo "DUPLICATE TIMESTAMPS: $dupes"; fail=1; }
+          exit $fail
+
+      - name: No retryable SQLSTATEs
+        # PostgREST retries 40001/40P01 server-side in an INFINITE loop, even
+        # after the client disconnects. This once pinned a production database
+        # at ~95% CPU for days. Use PT409 for conflict semantics.
+        run: |
+          if grep -rnE "ERRCODE\s*=?\s*'(40001|40P01)'" supabase/migrations/; then
+            echo "FAIL: use PT409, never a retryable errcode"; exit 1
+          fi
+
+      - name: Policy and DDL guards
+        run: |
+          fail=0
+          grep -rn "CONCURRENTLY" supabase/migrations/ && { echo "FAIL: CONCURRENTLY cannot run in a migration txn"; fail=1; }
+          for f in $(grep -rln "CREATE POLICY" supabase/migrations/); do
+            grep -q "DROP POLICY IF EXISTS" "$f" || { echo "FAIL: $f creates a policy without a guarded drop"; fail=1; }
+          done
+          for f in $(grep -rln "SECURITY DEFINER" supabase/migrations/); do
+            grep -q "search_path" "$f" || { echo "FAIL: $f has SECURITY DEFINER with no search_path pin"; fail=1; }
+          done
+          exit $fail
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: cd backend && uv sync --all-extras
+      - name: Start pgvector integration database
+        run: |
+          docker run --detach --name nt-verify \
+            --env POSTGRES_PASSWORD=x \
+            pgvector/pgvector:pg17
+          for attempt in {1..30}; do
+            if docker exec nt-verify pg_isready -U postgres; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs nt-verify
+          exit 1
+      - name: Lint
+        run: cd backend && uv run ruff check app tests && uv run ruff format --check app tests
+      - name: Typecheck strict backend boundaries
+        run: >-
+          cd backend && uv run mypy
+          app/core
+          app/domain/admin
+          app/domain/water
+          app/services/db_results.py
+          app/services/identity.py
+      - name: Layering contracts
+        run: cd backend && uv run lint-imports
+      - name: Tests
+        env:
+          NT_REQUIRE_DATABASE: "1"
+          NT_FAIL_ON_SKIP: "1"
+        run: cd backend && uv run pytest -q
+
+  frontend-isolation:
+    name: Frontend isolation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The frontend must not touch the database or the backend directly
+        run: bash scripts/check-frontend-isolation.sh
+
+  frontends:
+    name: Frontends
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: { app: [customer-app, internal-dashboard] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: cd ${{ matrix.app }} && npm install
+      - run: cd ${{ matrix.app }} && npm run test
+      - run: cd ${{ matrix.app }} && npm run typecheck
+      - run: cd ${{ matrix.app }} && npm run build

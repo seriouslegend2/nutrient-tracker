@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nutrient Tracker - Current Status</title>
+<style>
+:root { color-scheme:dark; --bg:#0c0e11; --card:#151a21; --line:#2b3440; --tx:#e8ebef; --muted:#a7b1bf; --ok:#7dd3a0; --warn:#e8b866; --bad:#e07a6a; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--tx); font:15px/1.62 system-ui,-apple-system,"Segoe UI",sans-serif; }
+main { width:min(1080px,calc(100% - 32px)); margin:auto; padding:48px 0 96px; }
+h1 { margin:0; font-size:clamp(2rem,5vw,3.2rem); line-height:1.05; }
+h2 { margin:46px 0 12px; padding-top:16px; border-top:1px solid var(--line); }
+p,li,td { color:var(--muted); }
+code { color:#d7f4e1; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+table { width:100%; border-collapse:collapse; }
+th,td { padding:11px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:.07em; }
+.meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:18px; }
+.pill { border:1px solid var(--line); border-radius:999px; padding:5px 10px; color:var(--muted); font:12px ui-monospace,monospace; }
+.card { margin:16px 0; padding:18px 20px; border:1px solid var(--line); border-left:3px solid var(--ok); border-radius:10px; background:var(--card); }
+.warn { border-left-color:var(--warn); }
+.bad { border-left-color:var(--bad); }
+.ok { color:var(--ok); font-weight:700; }
+.pending { color:var(--warn); font-weight:700; }
+@media (max-width:700px) { main { padding-top:28px; } th,td { padding:9px 7px; } }
+</style>
+</head>
+<body><main>
+<header>
+  <h1>Current Build Status</h1>
+  <p>Evidence-based state after remediation. Historical build counts and unexecuted "verified" claims have been removed.</p>
+  <div class="meta"><span class="pill">checked 2026-08-16</span><span class="pill">12 migrations</span><span class="pill">68 backend tests</span><span class="pill">27 customer auth tests</span><span class="pill">22 dashboard tests</span></div>
+</header>
+
+<section>
+<h2>Product Status</h2>
+<table>
+<thead><tr><th>Area</th><th>Status</th><th>Evidence in repository</th></tr></thead>
+<tbody>
+<tr><td>Backend API</td><td class="ok">Implemented</td><td>Profile/onboarding, meals/day history, dishes/categories, goals, reports, water, messages, and admin routers under <code>backend/app/api/v1</code>.</td></tr>
+<tr><td>Database</td><td class="ok">Implemented locally</td><td>12 ordered migrations; 15 expected public tables; formulas, triggers, atomic versioning functions, grants, and RLS.</td></tr>
+<tr><td>Customer UI</td><td class="ok">Implemented</td><td>Email/password signup and login, optional email-confirmation callback, first-run onboarding, goal flow, home, manual meals, agent, analytics, hydration, and logout.</td></tr>
+<tr><td>Dashboard</td><td class="ok">Implemented, bounded scope</td><td>Email/password sign-in for existing accounts only, logout, backend admin-role gate, paginated users, six supported user views, aggregate agent metrics, and portion resolution mix. It has no signup or callback; search/filter/sort and Food DB tools are absent by design.</td></tr>
+<tr><td><code>nutrition_chat</code></td><td class="ok">Implemented, provider-dependent</td><td>LangChain agent, read/mutation tools, confirmation gating, persistence, and unit flow tests.</td></tr>
+<tr><td><code>media_extraction</code></td><td class="ok">Implemented, provider-dependent</td><td>LangGraph orchestration for images, explicit label hints, audio, and PDF drafts; byte limits and agent-run persistence.</td></tr>
+<tr><td>Video</td><td class="pending">Not supported</td><td>Video MIME types are explicitly rejected.</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2>Verification Run</h2>
+<div class="card">
+<p><strong>Commands were run locally on 2026-08-16.</strong> Results below are command evidence, not inferred from generated artifacts.</p>
+<ul>
+  <li><code>uv run ruff check app tests</code>: passed.</li>
+  <li><code>uv run ruff format --check app tests</code>: passed; 74 files already formatted.</li>
+  <li>Configured mypy command from CI: passed with no issues in 12 source files.</li>
+  <li><code>uv run lint-imports</code>: 4 contracts kept, 0 broken; 64 files and 126 dependencies analyzed.</li>
+  <li><code>NT_REQUIRE_DATABASE=1 NT_FAIL_ON_SKIP=1 uv run pytest -q</code> against <code>pgvector/pgvector:pg17</code>: <code>68 passed in 9.06s</code>, no skips.</li>
+  <li>Customer auth Vitest suite: <code>27 passed</code>; dashboard Vitest suite: <code>22 passed</code>.</li>
+  <li><code>npm audit --omit=dev</code> in each frontend: 0 production vulnerabilities.</li>
+  <li>Customer app <code>npm run typecheck</code> and <code>npm run build</code>: passed.</li>
+  <li>Internal dashboard <code>npm run typecheck</code> and <code>npm run build</code>: passed.</li>
+  <li><code>bash scripts/check-frontend-isolation.sh</code>: passed.</li>
+</ul>
+</div>
+<p>The production builds resolved Next.js 16.3.1, React 19.2.8, and Recharts 2.15.4 in both applications. The backend lock resolved FastAPI 0.141.1, Pydantic 2.13.4, Supabase Python 2.31.0, LangChain 1.3.15, and LangGraph 1.2.11.</p>
+<div class="card bad"><p>A supplied Supabase service-role key was exposed and must be rotated before use; its value must never be recorded here. The actual local environment files contain public project values and placeholders for the rotated service-role key and replacement JWT secrets. Checked-in examples use generic values.</p></div>
+</section>
+
+<section>
+<h2>What The Database Run Proves</h2>
+<ul>
+  <li>All 12 migrations apply in order to an empty Postgres 17 database shaped with the Supabase roles, <code>auth.users</code>, and <code>auth.uid()</code> stub required by the suite.</li>
+  <li>Nutrition formulas, calorie floors, safe-rate clamps, target-BMI and medical guards, and behaviour goals pass worked assertions.</li>
+  <li>Portion resolution order, unknown fallback, body/profile refresh, coherent meal-day versions, atomic preference/portion swaps, active-goal uniqueness, and schema presence are tested.</li>
+  <li>RLS enablement is checked on user-owned tables.</li>
+  <li>Privileged security-definer functions are checked as unavailable to public, anonymous, and authenticated roles and available to the service role.</li>
+  <li>The 18 global category defaults exist and seeded nutrient vectors do not store calorie values.</li>
+</ul>
+<div class="card warn"><p>This run is not hosted Supabase. It does not exercise PostgREST, a real Supabase JWT, hosted auth triggers, or own-row policy access through a real authenticated client. Backend database calls use service role and bypass RLS in production architecture as well.</p></div>
+</section>
+
+<section>
+<h2>CI Status</h2>
+<p>The checked-in GitHub workflow is configured to:</p>
+<ul>
+  <li>validate migration names and DDL/security guards;</li>
+  <li>start pgvector/Postgres 17 and fail if database tests are unavailable or skipped;</li>
+  <li>run Ruff, the configured mypy scope, all import-linter contracts, and pytest;</li>
+  <li>run frontend isolation and both frontend typechecks.</li>
+</ul>
+<p>No GitHub Actions run was queried during this reconciliation, so the workflow is described as configured, not as remotely passing. Production builds were run locally even though the current workflow only runs frontend typechecks.</p>
+</section>
+
+<section>
+<h2>Current Limitations</h2>
+<ul>
+  <li>Search is normalized substring matching, not ranked or semantic retrieval.</li>
+  <li>The optional dish seed contains 61 curated rows; the database migration contains 18 category defaults. There is no demo account seed.</li>
+  <li>Raw upload bytes are not persisted, so media replay and later visual admin inspection are unavailable.</li>
+  <li>Image/audio/PDF byte limits exist; PDF page and audio-duration limits do not.</li>
+  <li>Nutrition-label routing requires an explicit text or filename hint.</li>
+  <li>The customer manifest has no service worker/offline implementation. Export, self-service deletion, and a general post-onboarding profile editor are absent.</li>
+  <li>The dashboard intentionally omits user search/filter/sort, Food DB administration, body history, goal progress, and audit panels.</li>
+  <li>Frontend API interfaces are handwritten. There is no generated shared type/client artifact.</li>
+  <li>Focused Vitest suites cover email/password routes, safe redirects, backend JWT generation, API clients, pagination, and dashboard panel contracts: 27 customer auth tests and 22 dashboard tests. No browser automation suite is checked in.</li>
+</ul>
+</section>
+
+<section>
+<h2>Unverified External Runtime</h2>
+<div class="card bad">
+<p><strong>Live hosted Supabase email signup and signin remain externally unverified.</strong> The customer confirmation callback at <code>http://localhost:3000/auth/callback</code> also remains unverified when hosted confirmations are enabled. The sign-in-only dashboard does not need a callback.</p>
+</div>
+<ul>
+  <li>The exposed service-role key must be rotated and the service-role/JWT placeholders in local environment files must be replaced before hosted verification.</li>
+  <li>A real hosted Supabase migration push, PostgREST access, auth-user bootstrap, real JWT claims, and row-level policy behavior remain unverified without a linked project and credentials.</li>
+  <li>Live OpenAI calls for chat, image, label-hinted image, audio, and PDF remain unverified without a provider key. Unit tests use mocked provider output.</li>
+  <li>The complete browser signup, onboarding, meal, report, and admin flow remains unverified because it depends on those external services and there is no browser suite.</li>
+</ul>
+</section>
+
+<section>
+<h2>Next Verification</h2>
+<ol>
+  <li>Rotate the exposed service-role key, generate a replacement shared JWT secret, link a disposable Supabase project, and apply all migrations.</li>
+  <li>Enable the Supabase Email provider. Choose whether email confirmation is required; only if enabled, allow <code>http://localhost:3000/auth/callback</code>. Do not configure a dashboard callback.</li>
+  <li>Run customer signup/signin, optional confirmation, first-run onboarding, and logout; then run dashboard sign-in/logout, including role denial and an operator-granted <code>admin</code> role.</li>
+  <li>Exercise repository calls through hosted PostgREST and verify intended direct-client RLS behavior separately from service-role backend behavior.</li>
+  <li>Use a disposable OpenAI key to test supported modalities and confirmation failures.</li>
+</ol>
+</section>
+</main></body>
+</html>

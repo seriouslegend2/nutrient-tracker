@@ -1,0 +1,39 @@
+@import 'tailwindcss';
+
+/* Design tokens in oklch, light + dark. No hardcoded hex in components -
+   that rule is lint-enforced (see scripts/lint-design.mjs). */
+@theme {
+  --color-bg: oklch(0.99 0.005 95);
+  --color-surface: oklch(1 0 0);
+  --color-line: oklch(0.92 0.006 95);
+  --color-tx: oklch(0.25 0.01 95);
+  --color-tx2: oklch(0.52 0.012 95);
+  --color-accent: oklch(0.68 0.15 155);
+  --color-warn: oklch(0.75 0.14 75);
+  --color-danger: oklch(0.62 0.19 25);
+  --color-protein: oklch(0.65 0.16 255);
+  --color-carbs: oklch(0.72 0.14 75);
+  --color-fat: oklch(0.68 0.15 25);
+  --radius-card: 14px;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-bg: oklch(0.18 0.008 95);
+    --color-surface: oklch(0.22 0.008 95);
+    --color-line: oklch(0.3 0.01 95);
+    --color-tx: oklch(0.95 0.005 95);
+    --color-tx2: oklch(0.72 0.01 95);
+  }
+}
+
+html, body { background: var(--color-bg); color: var(--color-tx); }
+body { -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
+
+/* Mobile-first: designed at 390px and allowed to grow. */
+.app-shell { max-width: 640px; margin: 0 auto; padding-bottom: 84px; }
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+}
