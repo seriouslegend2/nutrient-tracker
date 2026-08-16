@@ -110,7 +110,7 @@ async def create_global_dish(
     actor: str,
     name: str,
     category: str,
-    per_100g: dict[str, float],
+    nutrients_per_unit: dict[str, float],
     source: str,
     aliases: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -121,7 +121,7 @@ async def create_global_dish(
             "p_name": name.strip(),
             "p_name_normalized": normalize(name),
             "p_category": category,
-            "p_per_100g": per_100g,
+            "p_nutrients_per_unit": nutrients_per_unit,
             "p_source": source,
             "p_actor_user_id": actor_user_id,
             "p_actor": actor,
@@ -134,8 +134,6 @@ async def create_global_dish(
     if not isinstance(created, dict):
         raise RuntimeError("Global dish creation returned no row")
     return created
-
-
 # ---------------------------------------------------------------------------
 # Overrides. Both are versioned: deactivate the live row, insert version + 1.
 # ---------------------------------------------------------------------------
@@ -146,7 +144,7 @@ async def set_dish_household(
     dish_id: str,
     portion_unit: str,
     portion_grams: float,
-    per_100g: dict[str, Any] | None = None,
+    nutrients_per_unit: dict[str, Any] | None = None,
     note: str | None = None,
 ) -> dict[str, Any]:
     """Level ②: this user's version of THIS dish."""
@@ -157,7 +155,7 @@ async def set_dish_household(
             "p_dish_id": dish_id,
             "p_portion_unit": portion_unit,
             "p_portion_grams": portion_grams,
-            "p_per_100g": per_100g,
+            "p_nutrients_per_unit": nutrients_per_unit,
             "p_note": note,
         },
     )

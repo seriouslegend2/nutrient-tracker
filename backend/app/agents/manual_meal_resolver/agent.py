@@ -51,7 +51,7 @@ def _resolution_from_tools(result: dict[str, Any]) -> ManualResolution | None:
             selected_food_id=str(created["food_id"]),
             category=str(created["category"]),
             canonical_name=str(created["name"]),
-            per_100g=created["per_100g"],
+            nutrients_per_unit=created["nutrients_per_unit"],
             updated_meal_id=updated_meal_id,
             confidence="medium",
             reason="Recovered the successful global-dish tool result.",

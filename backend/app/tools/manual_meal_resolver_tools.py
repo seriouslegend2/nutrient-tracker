@@ -9,7 +9,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from app.agents.manual_meal_resolver.models import Per100GNutrients
+from app.agents.manual_meal_resolver.models import UnitNutrients
 from app.domain.dishes import repository as dish_repo
 from app.domain.dishes.resolve import resolve_item
 from app.domain.meals import repository as meal_repo
@@ -40,7 +40,7 @@ def _context(config: RunnableConfig) -> tuple[str | None, str | None]:
 class CreateGlobalDishInput(BaseModel):
     canonical_name: str = Field(min_length=1)
     category: str = Field(min_length=1)
-    per_100g: Per100GNutrients
+    nutrients_per_unit: UnitNutrients
     alias: str | None = None
 
 
@@ -48,7 +48,7 @@ class CreateGlobalDishInput(BaseModel):
 async def create_global_dish(
     canonical_name: str,
     category: str,
-    per_100g: dict[str, float],
+    nutrients_per_unit: dict[str, float],
     alias: str | None = None,
     config: RunnableConfig = None,
 ) -> dict[str, Any]:
@@ -64,13 +64,13 @@ async def create_global_dish(
     categories = {str(row["category"]) for row in await dish_repo.list_active_categories()}
     if category not in categories:
         return {"status": "ERROR", "message": "Category is not in the active static catalog"}
-    nutrients = Per100GNutrients.model_validate(per_100g).model_dump(exclude_none=True)
+    nutrients = UnitNutrients.model_validate(nutrients_per_unit).model_dump(exclude_none=True)
     created = await dish_repo.create_global_dish(
         actor_user_id=user_id,
         actor="manual_meal_resolver",
         name=canonical_name,
         category=category,
-        per_100g=nutrients,
+        nutrients_per_unit=nutrients,
         source="manual_meal_resolver",
         aliases=[alias] if alias else [],
     )
@@ -79,7 +79,7 @@ async def create_global_dish(
         "food_id": str(created["dish_id"]),
         "name": str(created["name"]),
         "category": str(created["category"]),
-        "per_100g": nutrients,
+        "nutrients_per_unit": nutrients,
     }
 
 

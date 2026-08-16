@@ -7,7 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from app.domain.dishes import repository as dish_repo
-from app.domain.dishes.resolve import resolve_portion, scale_nutrients
+from app.domain.dishes.resolve import resolve_portion, scale_nutrients_for_grams
 
 
 def _positive_number(value: Any) -> float | None:
@@ -176,7 +176,11 @@ async def enrich_media_payload(*, user_id: str, payload: dict[str, Any]) -> dict
                 "portion_metadata": portion_metadata,
                 "total_grams": grams,
                 "amount_source": amount_source,
-                "nutrients": scale_nutrients(chain.get("per_100g") or {}, grams)
+                "nutrients": scale_nutrients_for_grams(
+                    chain.get("nutrients_per_unit") or {},
+                    grams,
+                    float(chain.get("portion_grams") or grams),
+                )
                 if grams is not None
                 else {},
                 "matching_confidence": "exact",

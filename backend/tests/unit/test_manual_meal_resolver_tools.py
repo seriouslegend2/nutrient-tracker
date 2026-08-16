@@ -23,7 +23,7 @@ async def test_create_tool_uses_agent_estimate_and_static_category(monkeypatch) 
         {
             "canonical_name": "Amla",
             "category": "fruit",
-            "per_100g": {"protein_g": 1, "carbs_g": 10, "fat_g": 0.5},
+            "nutrients_per_unit": {"protein_g": 1.2, "carbs_g": 12, "fat_g": 0.6},
             "alias": "amla",
         },
         config={"configurable": {"user_id": "user-1"}},
@@ -31,7 +31,11 @@ async def test_create_tool_uses_agent_estimate_and_static_category(monkeypatch) 
 
     assert result["food_id"] == "dish-new"
     assert captured["actor"] == "manual_meal_resolver"
-    assert captured["per_100g"] == {"protein_g": 1, "carbs_g": 10, "fat_g": 0.5}
+    assert captured["nutrients_per_unit"] == {
+        "protein_g": 1.2,
+        "carbs_g": 12,
+        "fat_g": 0.6,
+    }
 
 
 async def test_create_tool_rejects_generic_meal_descriptions() -> None:
@@ -39,7 +43,7 @@ async def test_create_tool_rejects_generic_meal_descriptions() -> None:
         {
             "canonical_name": "Special mixed plate",
             "category": "protein_main",
-            "per_100g": {"protein_g": 15, "carbs_g": 10, "fat_g": 8},
+            "nutrients_per_unit": {"protein_g": 22.5, "carbs_g": 15, "fat_g": 12},
             "alias": "restaurant meal",
         },
         config={"configurable": {"user_id": "user-1"}},
@@ -59,7 +63,7 @@ async def test_create_tool_rejects_category_outside_static_catalog(monkeypatch) 
         {
             "canonical_name": "Amla",
             "category": "invented_category",
-            "per_100g": {"protein_g": 1, "carbs_g": 10, "fat_g": 0.5},
+            "nutrients_per_unit": {"protein_g": 1.2, "carbs_g": 12, "fat_g": 0.6},
         },
         config={"configurable": {"user_id": "user-1"}},
     )

@@ -249,13 +249,13 @@ export type Dish = {
   category: string
   portion_unit: string
   portion_grams: number
-  per_100g: Record<string, number>
+  nutrients_per_unit: Record<string, number>
 }
 
 export type DishPortion = {
   portion_unit: string
   portion_grams: number | null
-  per_100g: Record<string, number>
+  nutrients_per_unit: Record<string, number>
   resolved_from: string
 }
 
@@ -500,6 +500,7 @@ export type WaterLog = { logged_on: string; volume_ml: number }
 export type MealDraftConfidence = 'low' | 'medium' | 'high' | string
 
 export type MediaMealDraftItem = {
+  evidence_id?: string
   name: string
   name_normalized?: string
   estimated_mass_g?: number | null
@@ -512,6 +513,7 @@ export type MediaMealDraftItem = {
   quantity?: number | null
   unit?: string | null
   portions?: number | null
+  servings?: number | null
   portion_count?: number | null
   portion_unit?: string | null
   count?: number | null
@@ -527,11 +529,14 @@ export type MediaMealDraftItem = {
     portion_unit?: string | null
     portion_grams?: number | null
     portion_count?: number | null
+    base_portion_unit?: string | null
+    base_portion_grams?: number | null
     effective_portion_grams?: number | null
     is_custom?: boolean
     resolved_portion_unit?: string | null
     resolved_portion_grams?: number | null
     resolved_from?: string | null
+    fixed?: boolean
   }
   nutrients?: Record<string, number>
   meal_date?: string | null
@@ -552,6 +557,7 @@ export type MediaMealDraftPayload = {
 }
 
 export type MealDraftConfirmItem = {
+  evidence_id?: string
   dish_name: string
   grams: number | null
   portions: number

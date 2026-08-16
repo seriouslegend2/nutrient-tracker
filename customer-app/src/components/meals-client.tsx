@@ -203,8 +203,8 @@ function ManualMealForm({ date, initialSlot, onCancel, onCreated }: {
   }, [resolved.data])
   const previewGrams = (resolved.data?.portion_grams ?? selectedDish?.portion_grams ?? 0) * Number(portions || 0)
   const previewNutrients = scaleNutrients(
-    resolved.data?.per_100g ?? selectedDish?.per_100g ?? {},
-    previewGrams
+    resolved.data?.nutrients_per_unit ?? selectedDish?.nutrients_per_unit ?? {},
+    Number(portions || 0)
   )
 
   const create = useMutation({
@@ -235,7 +235,7 @@ function ManualMealForm({ date, initialSlot, onCancel, onCreated }: {
     {results.data && !selectedDish && (
       <div className="mt-2 max-h-44 overflow-y-auto rounded-lg border" style={{ borderColor: 'var(--color-line)' }}>
         {results.data.items.map((dish) => {
-          const nutrients = scaleNutrients(dish.per_100g, dish.portion_grams)
+          const nutrients = scaleNutrients(dish.nutrients_per_unit, 1)
           return <button key={dish.dish_id} type="button"
             onClick={() => { setSelectedDish(dish); setSearch(dish.name); setPortionUnit(dish.portion_unit) }}
             className="block w-full border-b px-3 py-2.5 text-left text-sm last:border-b-0"

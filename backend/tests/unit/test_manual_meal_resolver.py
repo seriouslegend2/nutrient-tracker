@@ -17,8 +17,8 @@ from app.agents.manual_meal_resolver.models import (
     HouseholdPortionContext,
     ManualResolution,
     ManualResolverInput,
-    Per100GNutrients,
     ResolvedManualDish,
+    UnitNutrients,
 )
 from app.agents.manual_meal_resolver.prompt import MANUAL_MEAL_RESOLVER_USER_PROMPT
 from app.services.prompts import ResolvedPrompt
@@ -56,7 +56,7 @@ def test_successful_create_tool_recovers_missing_structured_response() -> None:
         {
             "messages": [
                 ToolMessage(
-                    content='{"status":"OK","food_id":"dish-new","name":"Amla","category":"fruit","per_100g":{"protein_g":1,"carbs_g":10,"fat_g":0.5}}',
+                    content='{"status":"OK","food_id":"dish-new","name":"Amla","category":"fruit","nutrients_per_unit":{"protein_g":1.2,"carbs_g":12,"fat_g":0.6}}',
                     name="create_global_dish",
                     tool_call_id="create-1",
                 )
@@ -81,7 +81,7 @@ def _resolver_input() -> ManualResolverInput:
                 name="Apple",
                 name_normalized="apple",
                 category="fruit",
-                per_100g={"protein_g": 0.3},
+                nutrients_per_unit={"protein_g": 0.36},
                 source="seed",
             )
         ],
@@ -182,7 +182,7 @@ async def _dishes() -> list[dict[str, Any]]:
             "name_normalized": "chicken curry",
             "aliases": [],
             "category": "protein_main",
-            "per_100g": {"protein_g": 18, "carbs_g": 4, "fat_g": 10},
+            "nutrients_per_unit": {"protein_g": 27, "carbs_g": 6, "fat_g": 15},
             "source": "seed",
         }
     ]
@@ -279,7 +279,9 @@ async def test_runner_accepts_the_food_id_returned_by_the_creation_tool(monkeypa
                 selected_food_id="dish-new",
                 category="fruit",
                 canonical_name="Amla",
-                per_100g=Per100GNutrients(protein_g=0.9, carbs_g=10.2, fat_g=0.6),
+                nutrients_per_unit=UnitNutrients(
+                    protein_g=1.08, carbs_g=12.24, fat_g=0.72
+                ),
                 updated_meal_id="meal-2",
                 confidence="high",
                 reason="Created through the global dish tool",

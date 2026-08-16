@@ -29,7 +29,7 @@ class DishResponse(BaseModel):
     category: str
     portion_unit: str
     portion_grams: float
-    per_100g: dict[str, Any] = {}
+    nutrients_per_unit: dict[str, Any] = {}
     aliases: list[str] = []
     source: str
 
@@ -37,7 +37,7 @@ class DishResponse(BaseModel):
 class PortionResponse(BaseModel):
     portion_unit: str
     portion_grams: float | None
-    per_100g: dict[str, Any] = {}
+    nutrients_per_unit: dict[str, Any] = {}
     resolved_from: str
 
 

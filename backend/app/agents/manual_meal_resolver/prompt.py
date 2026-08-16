@@ -34,14 +34,14 @@ Rules:
   including spelling variants, transliterations, abbreviations, and ordinary preparation words.
 - For match_existing, selected_food_id must be copied exactly from a global_dishes.food_id value.
   These are UUIDs. Leave fields belonging to other actions null.
-- Use create_new for a recognizable food when no supplied global dish represents it. Estimate a
-  practical average prepared-food nutrient profile per 100 g. protein_g, carbs_g, and fat_g are
-  required; include only micronutrients you can estimate reasonably. Do not include calories.
+- Use create_new for a recognizable food when no supplied global dish represents it. Copy the
+  category's fixed unit and grams from global_categories, then estimate nutrients for exactly one
+  such unit. protein_g, carbs_g, and fat_g are required; do not include calories.
 - Create only an established food identity with sufficiently known ingredients and preparation.
   Generic or variable descriptions such as "special mixed plate", "restaurant meal", "thali",
   "combo", "food", "dish", "plate", or "bowl" must be unresolved and must not call either tool.
-- Call create_global_dish with the canonical name, category, per_100g estimate, and entered name as
-  an alias. Use the exact food_id returned by the tool.
+- Call create_global_dish with the canonical name, category, nutrients_per_unit estimate, and
+  entered name as an alias. Use the exact food_id returned by the tool.
 - After create_global_dish succeeds, the final action remains create_new; do not reclassify the
   newly created food as match_existing.
 - category must be copied exactly from the supplied global categories.
@@ -51,6 +51,6 @@ Rules:
 - For every successful existing or new match, call update_meal_resolution with the supplied
   meal_id and resolved food_id. Copy the updated meal ID returned by that tool into updated_meal_id.
 - Never claim match_existing or create_new unless update_meal_resolution returned status OK.
-- Never output meal grams, meal nutrients, portions, or invented database IDs. A per-100g estimate
-  is required only when creating a new global dish.
+- Never output meal grams, meal nutrients, portions, or invented database IDs. A one-unit nutrient
+  estimate is required only when creating a new global dish.
 - Serving conversion and nutrition calculation are deterministic application responsibilities."""

@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest'
 import { otherNutrients, primaryNutrients, scaleNutrients } from '../src/lib/nutrients'
 
 describe('dish nutrient display', () => {
-  it('scales per-100g values to the selected serving and recomputes energy', () => {
-    expect(scaleNutrients({ protein_g: 18, carbs_g: 4, fat_g: 10, iron_mg: 1.2 }, 150)).toEqual({
-      protein_g: 27,
-      carbs_g: 6,
-      fat_g: 15,
-      iron_mg: 1.8,
-      calories_kcal: 267,
+  it('scales one fixed-unit value by selected units and recomputes energy', () => {
+    expect(scaleNutrients({ protein_g: 27, carbs_g: 6, fat_g: 15, iron_mg: 1.8 }, 2)).toEqual({
+      protein_g: 54,
+      carbs_g: 12,
+      fat_g: 30,
+      iron_mg: 3.6,
+      calories_kcal: 534,
     })
   })
 

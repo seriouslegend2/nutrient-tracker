@@ -393,13 +393,14 @@ def test_pregnancy_guard_is_scoped_to_weight_goals() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_chain_prefers_household_over_global_and_dish_over_category() -> None:
+def test_chain_uses_fixed_category_unit_with_optional_dish_nutrition_override() -> None:
     dish = psql(
         """WITH inserted AS (
                INSERT INTO dish_global (
-                   name, name_normalized, category, portion_unit, portion_grams, per_100g)
-               VALUES ('Dal Tadka', 'dal tadka', 'dal_gravy', 'katori', 180,
-                       '{"protein_g": 6}'::jsonb)
+                    name, name_normalized, category, portion_unit, portion_grams,
+                    nutrients_per_unit)
+               VALUES ('Dal Tadka', 'dal tadka', 'dal_gravy', 'katori', 200,
+                       '{"protein_g": 12}'::jsonb)
                RETURNING dish_id
            )
            SELECT dish_id FROM inserted;"""
@@ -420,15 +421,54 @@ def test_chain_prefers_household_over_global_and_dish_over_category() -> None:
              WHERE user_id='{USER_ID}' AND category='dal_gravy';
             DELETE FROM dish_global WHERE dish_id='{dish}';"""
     )
-    # With both overrides present, the per-DISH household row must win.
+    # A dish-specific nutrition override may win, but its unit remains globally fixed.
     assert level == "dish_household"
 
 
 def test_category_global_always_answers() -> None:
     """Level 5 is the floor of the chain: a log is never blocked."""
     grams = psql(f"SELECT portion_grams FROM fn_resolve_portion('{USER_ID}',NULL,'flatbread');")
-    # one portion of flatbread is TWO pieces of 45 g
-    assert float(grams) == 90.0
+    # The usual count is two pieces, but one explicit unit remains one 45 g piece.
+    assert float(grams) == 45.0
+
+
+def test_household_usual_count_does_not_change_fixed_unit_grams() -> None:
+    dish_id = psql(
+        """WITH inserted AS (
+               INSERT INTO dish_global (
+                   name, name_normalized, category, portion_unit, portion_grams,
+                   nutrients_per_unit)
+               VALUES ('Unit Test Rice', 'unit test rice', 'rice_grain', 'bowl', 150,
+                       '{"protein_g":4,"carbs_g":42,"fat_g":1}'::jsonb)
+               RETURNING dish_id)
+           SELECT dish_id FROM inserted;"""
+    )
+    psql(
+        f"SELECT id FROM fn_set_category_household_count("
+        f"'{USER_ID}', 'rice_grain', 0.5, 'questionnaire');"
+    )
+
+    resolved = psql(
+        f"SELECT portion_grams || ',' || resolved_from "
+        f"FROM fn_resolve_portion('{USER_ID}','{dish_id}',NULL);"
+    )
+
+    psql(
+        f"""DELETE FROM category_household
+              WHERE user_id='{USER_ID}' AND category='rice_grain';
+            DELETE FROM dish_global WHERE dish_id='{dish_id}';"""
+    )
+    assert resolved == "150,dish_global"
+
+
+def test_legacy_per_100g_columns_are_removed() -> None:
+    columns = psql(
+        """SELECT count(*) FROM information_schema.columns
+            WHERE table_schema='public'
+              AND table_name IN ('dish_global','dish_household')
+              AND column_name='per_100g';"""
+    )
+    assert columns == "0"
 
 
 def test_unresolvable_returns_unknown_rather_than_guessing() -> None:
@@ -436,11 +476,11 @@ def test_unresolvable_returns_unknown_rather_than_guessing() -> None:
     assert level == "unknown"
 
 
-def test_agent_global_dish_creation_is_idempotent_and_provider_backed() -> None:
+def test_agent_global_dish_creation_is_idempotent_and_unit_based() -> None:
     dish_id = psql(
         f"""SELECT dish_id FROM fn_create_global_dish(
             'Amla', 'amla', 'fruit',
-            '{{"protein_g":0.9,"carbs_g":10.2,"fat_g":0.6,"calories_kcal":44}}'::jsonb,
+            '{{"protein_g":1.08,"carbs_g":12.24,"fat_g":0.72,"calories_kcal":53}}'::jsonb,
             'manual_meal_resolver:test-123', '{USER_ID}', 'manual_meal_resolver',
             ARRAY['indian gooseberry']);"""
     )
@@ -457,10 +497,13 @@ def test_agent_global_dish_creation_is_idempotent_and_provider_backed() -> None:
             "SELECT count(*) || ',' || min(portion_unit) || ',' || min(portion_grams) "
             "FROM dish_global WHERE name_normalized='amla' AND is_active;"
         )
-        == "1,serving,120"
+        == "1,piece,120"
     )
     assert (
-        psql(f"SELECT per_100g ? 'calories_kcal' FROM dish_global WHERE dish_id='{dish_id}';")
+        psql(
+            f"SELECT nutrients_per_unit ? 'calories_kcal' "
+            f"FROM dish_global WHERE dish_id='{dish_id}';"
+        )
         == "f"
     )
     assert (
@@ -925,5 +968,7 @@ def test_weight_based_categories_use_one_human_serving() -> None:
 
 def test_energy_is_never_stored_on_a_seeded_dish() -> None:
     """EuroFIR Step 10: energy is always calculated, never borrowed."""
-    stored = psql("SELECT count(*) FROM dish_global WHERE per_100g ? 'calories_kcal';")
+    stored = psql(
+        "SELECT count(*) FROM dish_global WHERE nutrients_per_unit ? 'calories_kcal';"
+    )
     assert int(stored) == 0, "seeded dishes must not carry a stored energy value"

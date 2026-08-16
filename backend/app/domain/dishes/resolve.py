@@ -7,7 +7,7 @@
     ⑤ category_global     (category)      <- always answers
 
     grams     = portions x portion_grams
-    nutrients = per_100g x grams / 100
+    nutrients = nutrients_per_unit x portions
 
 The chain itself is a Postgres function (``fn_resolve_portion``) so that a
 trigger, a backfill and the API all evaluate the same logic. This module is the
@@ -17,6 +17,7 @@ answered so a wrong number is always attributable.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,7 +49,7 @@ class Resolution:
 async def resolve_portion(
     user_id: str, food_id: str | None, category: str | None
 ) -> dict[str, Any]:
-    """Run the chain. Returns portion_unit, portion_grams, per_100g, resolved_from."""
+    """Return the fixed category unit and nutrients for exactly one unit."""
     rows = await call_rpc(
         "fn_resolve_portion",
         {"p_user_id": user_id, "p_food_id": food_id, "p_category": category},
@@ -57,27 +58,38 @@ async def resolve_portion(
         return {
             "portion_unit": "g",
             "portion_grams": None,
-            "per_100g": {},
+            "nutrients_per_unit": {},
             "resolved_from": "unknown",
         }
     return rows[0] if isinstance(rows, list) else rows
 
 
-def scale_nutrients(per_100g: dict[str, Any], grams: float) -> dict[str, float]:
-    """per_100g x grams / 100, with energy recomputed rather than scaled."""
-    if not per_100g or grams is None:
+def scale_unit_nutrients(
+    nutrients_per_unit: dict[str, Any], units: float
+) -> dict[str, float]:
+    """Scale one fixed category unit and always recompute energy from macros."""
+    if not nutrients_per_unit:
         return {}
-    factor = grams / 100.0
     out: dict[str, float] = {}
-    for key, value in per_100g.items():
+    for key, value in nutrients_per_unit.items():
         if key == "calories_kcal":
             continue  # recomputed below, never carried through
         try:
-            out[key] = round(float(value) * factor, 2)
+            out[key] = round(float(value) * float(units), 2)
         except (TypeError, ValueError):
             continue
-    out["calories_kcal"] = round(sum(out.get(k, 0.0) * f for k, f in ATWATER.items()), 0)
+    energy = sum(out.get(k, 0.0) * f for k, f in ATWATER.items())
+    out["calories_kcal"] = float(math.floor(energy + 0.5))
     return out
+
+
+def scale_nutrients_for_grams(
+    nutrients_per_unit: dict[str, Any], grams: float, unit_grams: float
+) -> dict[str, float]:
+    """Convert an observed gram amount to fixed units, then scale nutrition."""
+    if unit_grams <= 0:
+        return {}
+    return scale_unit_nutrients(nutrients_per_unit, grams / unit_grams)
 
 
 async def resolve_item(
@@ -97,7 +109,16 @@ async def resolve_item(
     """
     if grams_override is not None:
         chain = await resolve_portion(user_id, food_id, category)
-        nutrients = scale_nutrients(chain.get("per_100g") or {}, grams_override)
+        fixed_unit_grams = chain.get("portion_grams")
+        nutrients = (
+            scale_nutrients_for_grams(
+                chain.get("nutrients_per_unit") or {},
+                grams_override,
+                float(fixed_unit_grams),
+            )
+            if fixed_unit_grams is not None
+            else {}
+        )
         return Resolution(
             portion_unit=portion_unit_override or chain.get("portion_unit") or "g",
             portion_grams=grams_override,
@@ -117,7 +138,7 @@ async def resolve_item(
         raise UnresolvedDishError(dish_name)
 
     grams = float(portion_grams) * float(portions)
-    nutrients = scale_nutrients(chain.get("per_100g") or {}, grams)
+    nutrients = scale_unit_nutrients(chain.get("nutrients_per_unit") or {}, portions)
 
     return Resolution(
         portion_unit=portion_unit_override or chain.get("portion_unit") or "g",

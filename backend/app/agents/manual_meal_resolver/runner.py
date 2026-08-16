@@ -104,7 +104,7 @@ async def run_manual_meal_resolver(
                     name_normalized=str(row["name_normalized"]),
                     aliases=list(row.get("aliases") or []),
                     category=str(row["category"]),
-                    per_100g=row.get("per_100g") or {},
+                    nutrients_per_unit=row.get("nutrients_per_unit") or {},
                     source=str(row.get("source") or "unknown"),
                 )
                 for row in dishes

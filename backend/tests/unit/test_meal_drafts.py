@@ -31,9 +31,9 @@ async def _portion_rows(_user_id: str) -> list[dict[str, Any]]:
 async def _resolved_portion(*_args: Any) -> dict[str, Any]:
     return {
         "portion_unit": "katori",
-        "portion_grams": 240,
-        "per_100g": {"protein_g": 10, "carbs_g": 20, "fat_g": 5},
-        "resolved_from": "category_household",
+        "portion_grams": 160,
+        "nutrients_per_unit": {"protein_g": 16, "carbs_g": 32, "fat_g": 8},
+        "resolved_from": "dish_global",
     }
 
 
@@ -104,8 +104,8 @@ async def test_missing_mass_uses_household_effective_portion(monkeypatch) -> Non
         "effective_portion_grams": 240,
         "is_custom": True,
         "resolved_portion_unit": "katori",
-        "resolved_portion_grams": 240,
-        "resolved_from": "category_household",
+        "resolved_portion_grams": 160,
+        "resolved_from": "dish_global",
     }
     assert item["nutrients"]["protein_g"] == 24
 

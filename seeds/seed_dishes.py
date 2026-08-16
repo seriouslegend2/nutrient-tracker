@@ -14,15 +14,15 @@ SOURCES, and the honest state of each:
                         per-serving grams are the sum of RAW ingredient weights
                         divided by servings - NOT plate weight.
 
-  USDA FDC              CC0, unencumbered. Gap-fill for anything the Indian
-                        sources miss, and the source of the yield factors.
+  Public nutrient data Curated gap-fill for foods the Indian sources miss and
+                        for published cooking yield factors.
 
 YIELD FACTORS (Bognar 2002), applied once here and never again:
   rice 2.98 · lentils 2.73 · chicken 0.75 · potato 1.00 · spinach 0.95
 Cross-check: YF = (100 - water_raw) / (100 - water_cooked) gives 2.80 for rice
 and 3.02 for lentils, which matches the published tables.
 
-This file ships a curated starter set. Wire the full IFCT/INDB/USDA ETL behind
+This file ships a curated starter set. Wire the full nutrient-data ETL behind
 the same `upsert_dish` interface when the licensed data is in place.
 """
 
@@ -63,7 +63,8 @@ def cooked(per_100g_raw: dict[str, float], food_key: str) -> dict[str, float]:
 
 
 # ---------------------------------------------------------------------------
-# Starter set. per_100g is COOKED/as-eaten - every row is the form a user logs.
+# Starter source composition is COOKED/as-eaten and is converted to each
+# category's fixed unit before writing dish_global.
 # `calories_kcal` is omitted deliberately: energy is always recomputed from
 # macros (EuroFIR Step 10), never stored.
 # ---------------------------------------------------------------------------
@@ -159,11 +160,11 @@ async def upsert_dish(
     category: str,
     unit: str,
     grams: float,
-    per_100g: dict[str, float],
+    nutrients_per_unit: dict[str, float],
 ) -> None:
     existing = (
         await sb.table("dish_global").select(
-            "id,dish_id,version,name,category,portion_unit,portion_grams,per_100g,source"
+            "id,dish_id,version,name,category,portion_unit,portion_grams,nutrients_per_unit,source"
         )
         .eq("name_normalized", normalize(name)).eq("is_active", True).limit(1).execute()
     )
@@ -173,7 +174,7 @@ async def upsert_dish(
         "category": category,
         "portion_unit": unit,
         "portion_grams": grams,
-        "per_100g": per_100g,
+        "nutrients_per_unit": nutrients_per_unit,
         "source": "seed",
         "is_active": True,
     }
@@ -184,7 +185,7 @@ async def upsert_dish(
             and old["category"] == category
             and old["portion_unit"] == unit
             and float(old["portion_grams"]) == float(grams)
-            and old["per_100g"] == per_100g
+            and old["nutrients_per_unit"] == nutrients_per_unit
             and old["source"] == "seed"
         )
         if unchanged:
@@ -208,8 +209,27 @@ async def main() -> None:
     )
     logger.info("seed_start dishes={}", len(DISHES))
     try:
-        for name, category, unit, grams, per_100g in DISHES:
-            await upsert_dish(sb, name, category, unit, grams, per_100g)
+        category_rows = (
+            await sb.table("category_global")
+            .select("category,portion_unit,portion_grams")
+            .eq("is_active", True)
+            .execute()
+        ).data or []
+        categories = {str(row["category"]): row for row in category_rows}
+        for name, category, _unit, _grams, reference_composition in DISHES:
+            fixed = categories[category]
+            factor = float(fixed["portion_grams"]) / 100
+            nutrients_per_unit = {
+                key: round(value * factor, 2) for key, value in reference_composition.items()
+            }
+            await upsert_dish(
+                sb,
+                name,
+                category,
+                str(fixed["portion_unit"]),
+                float(fixed["portion_grams"]),
+                nutrients_per_unit,
+            )
         logger.info("seed_complete dishes={}", len(DISHES))
         print(
             f"Seeded {len(DISHES)} dishes across "

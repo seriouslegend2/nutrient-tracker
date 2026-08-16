@@ -28,14 +28,13 @@ export type NutrientDisplay = {
   unit: string
 }
 
-export function scaleNutrients(per100g: Record<string, number>, grams: number): Record<string, number> {
-  if (!Number.isFinite(grams) || grams <= 0) return {}
+export function scaleNutrients(nutrientsPerUnit: Record<string, number>, units: number): Record<string, number> {
+  if (!Number.isFinite(units) || units <= 0) return {}
 
-  const factor = grams / 100
   const scaled: Record<string, number> = {}
-  for (const [key, value] of Object.entries(per100g)) {
+  for (const [key, value] of Object.entries(nutrientsPerUnit)) {
     if (key === 'calories_kcal' || !Number.isFinite(value)) continue
-    scaled[key] = Math.round(value * factor * 100) / 100
+    scaled[key] = Math.round(value * units * 100) / 100
   }
   scaled.calories_kcal = Math.round(
     (scaled.protein_g ?? 0) * 4 +

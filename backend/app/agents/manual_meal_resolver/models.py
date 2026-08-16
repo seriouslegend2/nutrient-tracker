@@ -17,7 +17,7 @@ class GlobalDishContext(StrictModel):
     name_normalized: str = Field(min_length=1)
     aliases: list[str] = Field(default_factory=list)
     category: str
-    per_100g: dict[str, float] = Field(default_factory=dict)
+    nutrients_per_unit: dict[str, float] = Field(default_factory=dict)
     source: str
 
 
@@ -36,7 +36,7 @@ class HouseholdPortionContext(StrictModel):
     is_custom: bool
 
 
-class Per100GNutrients(StrictModel):
+class UnitNutrients(StrictModel):
     protein_g: float = Field(ge=0)
     carbs_g: float = Field(ge=0)
     fat_g: float = Field(ge=0)
@@ -69,7 +69,7 @@ class ManualResolution(StrictModel):
     selected_food_id: str | None = None
     category: str | None = None
     canonical_name: str | None = None
-    per_100g: Per100GNutrients | None = None
+    nutrients_per_unit: UnitNutrients | None = None
     updated_meal_id: str | None = None
     confidence: Literal["high", "medium", "low"]
     reason: str = Field(min_length=1)
@@ -81,13 +81,13 @@ class ManualResolution(StrictModel):
                 raise ValueError("Existing matches require selected_food_id")
             self.category = None
             self.canonical_name = None
-            self.per_100g = None
+            self.nutrients_per_unit = None
         elif self.action == "create_new":
             if (
                 not self.selected_food_id
                 or not self.category
                 or not self.canonical_name
-                or not self.per_100g
+                or not self.nutrients_per_unit
             ):
                 raise ValueError(
                     "New dishes require the tool-returned food ID, category, canonical name, and per-100g estimate"
@@ -96,7 +96,7 @@ class ManualResolution(StrictModel):
             self.selected_food_id = None
             self.category = None
             self.canonical_name = None
-            self.per_100g = None
+            self.nutrients_per_unit = None
             self.updated_meal_id = None
         return self
 
