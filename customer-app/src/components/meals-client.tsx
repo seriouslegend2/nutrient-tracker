@@ -185,9 +185,7 @@ function ManualMealForm({ date, initialSlot, onCancel, onCreated }: {
   const [slot, setSlot] = useState(initialSlot)
   const [search, setSearch] = useState('')
   const [selectedDish, setSelectedDish] = useState<Dish | null>(null)
-  const [custom, setCustom] = useState(false)
   const [portions, setPortions] = useState('1')
-  const [grams, setGrams] = useState('')
   const [portionUnit, setPortionUnit] = useState('portion')
   const deferredSearch = useDeferredValue(search.trim())
   const results = useQuery({
@@ -212,14 +210,11 @@ function ManualMealForm({ date, initialSlot, onCancel, onCreated }: {
   const create = useMutation({
     mutationFn: () => api.logMeal({ meal_date: date, meal_type: slot,
       dish_name: search.trim(), food_id: selectedDish?.dish_id,
-      portions: custom ? 1 : Number(portions),
-      grams: custom ? Number(grams) : undefined,
-      portion_unit: custom ? 'g' : portionUnit }),
+      portions: Number(portions),
+      portion_unit: selectedDish ? portionUnit : undefined }),
     onSuccess: onCreated,
   })
-  const invalid = custom
-    ? !search.trim() || !grams || Number(grams) <= 0
-    : !selectedDish || !portions || Number(portions) <= 0
+  const invalid = !search.trim() || !portions || Number(portions) <= 0
 
   return <section aria-labelledby="manual-meal-heading" className="card mb-4 p-5 sm:p-6">
     <div className="mb-4 flex items-center justify-between"><h2 id="manual-meal-heading" className="display-title text-2xl">Add manually</h2>
@@ -233,7 +228,7 @@ function ManualMealForm({ date, initialSlot, onCancel, onCreated }: {
       </label>
     </div>
     <label className="mt-3 block text-sm">Dish
-      <input value={search} onChange={(e) => { setSearch(e.target.value); setSelectedDish(null); setCustom(false) }}
+      <input value={search} onChange={(e) => { setSearch(e.target.value); setSelectedDish(null) }}
              placeholder="Search foods and dishes" className="input mt-1" />
     </label>
     {results.isFetching && <p className="mt-2 text-xs" style={{ color: 'var(--color-tx2)' }}>Searching…</p>}
@@ -250,30 +245,25 @@ function ManualMealForm({ date, initialSlot, onCancel, onCreated }: {
             <NutrientSummary nutrients={nutrients} className="mt-1 text-xs" />
           </button>
         })}
-        {!results.data.items.length && <div className="p-3"><p className="text-sm" style={{ color: 'var(--color-tx2)' }}>No matching food found.</p><button type="button" className="action-button mt-2 w-full" onClick={() => setCustom(true)}>Use “{search.trim()}” as a custom food</button></div>}
+        {!results.data.items.length && <div className="p-3"><p className="text-sm" style={{ color: 'var(--color-tx2)' }}>No matching food found. Add it with servings and we’ll resolve its category and nutrition.</p></div>}
       </div>
     )}
     {selectedDish && resolved.data && <p className="mt-2 text-xs" style={{ color: 'var(--color-tx2)' }}>
       Your resolved portion: {resolved.data.portion_grams ?? 'unknown'} g per {resolved.data.portion_unit} · {PROVENANCE[resolved.data.resolved_from] ?? resolved.data.resolved_from}
     </p>}
-    {custom ? <div className="mt-3 rounded-2xl p-4" style={{ background: 'var(--color-surface-soft)' }}>
-      <p className="font-semibold">Custom food</p>
-      <label className="mt-3 block text-sm">Amount eaten (grams)<input type="number" min="1" inputMode="decimal" value={grams} onChange={(e) => setGrams(e.target.value)} className="input mt-1" /></label>
-      <p className="mt-2 text-sm" style={{ color: 'var(--color-tx2)' }}>You can log this now, but nutrition totals may exclude it until it is matched to a food.</p>
-      <button type="button" className="action-button-secondary mt-3" onClick={() => setCustom(false)}>Back to search</button>
-    </div> : <div className="mt-3">
+    <div className="mt-3">
       <label className="text-sm">Servings<input type="number" min="0.1" step="0.1" value={portions}
         onChange={(e) => setPortions(e.target.value)} className="input mt-1" /></label>
-    </div>}
-    {!custom && selectedDish && resolved.data && previewGrams > 0 && <div className="mt-3 rounded-2xl p-4" style={{ background: 'var(--color-surface-soft)' }}>
+    </div>
+    {selectedDish && resolved.data && previewGrams > 0 && <div className="mt-3 rounded-2xl p-4" style={{ background: 'var(--color-surface-soft)' }}>
       <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-tx2)' }}>
         Estimated for {formatNutrientValue(Number(portions))} {Number(portions) === 1 ? 'serving' : 'servings'} · {formatNutrientValue(previewGrams)} g
       </p>
       <NutrientSummary nutrients={previewNutrients} className="mt-2 text-sm font-semibold" />
       <OtherNutrients nutrients={previewNutrients} />
     </div>}
-    {!custom && !selectedDish && search.trim() && <p className="mt-2 text-xs" style={{ color: 'var(--color-tx2)' }}>
-      Select a result, or use a custom food if there is no match.
+    {!selectedDish && search.trim() && <p className="mt-2 text-xs" style={{ color: 'var(--color-tx2)' }}>
+      Select a result for an instant match, or add this name and we’ll resolve it.
     </p>}
     {create.error && <p className="mt-3 text-sm" role="alert" style={{ color: 'var(--color-danger)' }}>{create.error.message}</p>}
     <button disabled={invalid || create.isPending} onClick={() => create.mutate()}

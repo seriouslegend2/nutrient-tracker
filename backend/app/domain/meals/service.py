@@ -6,6 +6,7 @@ import math
 from datetime import date
 from typing import Any
 
+from app.agents.manual_meal_resolver.runner import run_manual_meal_resolver
 from app.core.exceptions import NotFoundError, ValidationError
 from app.domain.dishes import repository as dish_repo
 from app.domain.dishes.resolve import ATWATER, resolve_item
@@ -48,6 +49,12 @@ async def _prepare_item(
         row_grams = grams
         row_nutrients = _normalise_supplied_nutrients(nutrients)
         resolved_from = "meals"
+    elif food_id is None and category is None and grams is None:
+        # Free text remains loggable when the resolver or nutrition provider is unavailable.
+        resolution_unit = portion_unit or "serving"
+        row_grams = None
+        row_nutrients = {}
+        resolved_from = "unknown"
     else:
         res = await resolve_item(
             user_id=user_id,
@@ -150,14 +157,26 @@ async def add_item(
             "is_active": True,
         }
     )
+    final_row = row
+    if row.get("food_id") is None and nutrients is None and grams is None and dish_name:
+        resolved_dish = await run_manual_meal_resolver(
+            user_id=user_id,
+            meal_id=str(row["id"]),
+            dish_name=str(row["dish_name"]),
+            servings=float(row["portions"]),
+        )
+        if resolved_dish:
+            mapped = await repo.get_meal(user_id, resolved_dish.updated_meal_id)
+            if mapped:
+                final_row = mapped
     logger.info(
         "meal_logged user_id={} date={} slot={} resolved_from={}",
         user_id,
         meal_date,
         meal_type,
-        item["resolved_from"],
+        final_row["resolved_from"],
     )
-    return row
+    return final_row
 
 
 async def replace_day(

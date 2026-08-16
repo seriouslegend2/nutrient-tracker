@@ -52,12 +52,15 @@ class Settings(BaseSettings):
     # --- llm -------------------------------------------------------------
     OPENAI_API_KEY: str = ""
     CHAT_MODEL: str = "gpt-4.1-nano"
-    VISION_MODEL: str = "gpt-4.1-nano"
+    MANUAL_RESOLVER_MODEL: str = "gpt-4.1-mini"
+    MEDIA_MEAL_RESOLVER_MODEL: str = "gpt-4.1-mini"
+    VISION_MODEL: str = "gpt-4.1-mini"
     AUDIO_MODEL: str = "gpt-4o-mini-transcribe"
 
     # --- LangSmith (optional prompt registry + tracing) -------------------
     LANGSMITH_API_KEY: str = ""
     LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"
+    LANGSMITH_WORKSPACE_ID: str = ""
     LANGSMITH_PROJECT: str = "nutrient-tracker-agents"
     LANGSMITH_TRACING: bool = False
 

@@ -307,6 +307,32 @@ def test_protein_goal_is_clamped_to_weight_based_baseline() -> None:
     assert row["derivation"]["protein_floor_applied"] is True
 
 
+def test_all_daily_nutrition_metrics_resolve_independently() -> None:
+    cases = (
+        ("calories_kcal", 2100, "around", "kcal"),
+        ("protein_g", 70, "at_least", "g"),
+        ("carbs_g", 250, "around", "g"),
+        ("fat_g", 65, "around", "g"),
+    )
+    for metric, value, direction, unit in cases:
+        row = json.loads(
+            psql(
+                f"""SELECT row_to_json(x) FROM fn_resolve_goal_targets_v2(
+                    '{USER_ID}', 'nutrient',
+                    '{{"nutrients":{{"{metric}":{value}}},"direction":"{direction}"}}'::jsonb,
+                    CURRENT_DATE, CURRENT_DATE + 30) x;"""
+            )
+        )
+        target = row["daily_targets"]["targets"][0]
+        assert target == {
+            "metric": metric,
+            "scope": "total",
+            "direction": direction,
+            "value": value,
+            "unit": unit,
+        }
+
+
 def test_extreme_hydration_minimum_has_a_recognizable_hint() -> None:
     result = subprocess.run(
         [
@@ -408,6 +434,42 @@ def test_category_global_always_answers() -> None:
 def test_unresolvable_returns_unknown_rather_than_guessing() -> None:
     level = psql(f"SELECT resolved_from FROM fn_resolve_portion('{USER_ID}',NULL,NULL);")
     assert level == "unknown"
+
+
+def test_agent_global_dish_creation_is_idempotent_and_provider_backed() -> None:
+    dish_id = psql(
+        f"""SELECT dish_id FROM fn_create_global_dish(
+            'Amla', 'amla', 'fruit',
+            '{{"protein_g":0.9,"carbs_g":10.2,"fat_g":0.6,"calories_kcal":44}}'::jsonb,
+            'manual_meal_resolver:test-123', '{USER_ID}', 'manual_meal_resolver',
+            ARRAY['indian gooseberry']);"""
+    )
+    repeated_id = psql(
+        f"""SELECT dish_id FROM fn_create_global_dish(
+            'AMLA duplicate', 'amla', 'fruit',
+            '{{"protein_g":99,"carbs_g":99,"fat_g":99}}'::jsonb,
+            'manual_meal_resolver:test-999', '{USER_ID}', 'manual_meal_resolver', ARRAY[]::text[]);"""
+    )
+
+    assert repeated_id == dish_id
+    assert (
+        psql(
+            "SELECT count(*) || ',' || min(portion_unit) || ',' || min(portion_grams) "
+            "FROM dish_global WHERE name_normalized='amla' AND is_active;"
+        )
+        == "1,serving,120"
+    )
+    assert (
+        psql(f"SELECT per_100g ? 'calories_kcal' FROM dish_global WHERE dish_id='{dish_id}';")
+        == "f"
+    )
+    assert (
+        psql(
+            f"SELECT count(*) FROM audit_log WHERE entity='dish_global' "
+            f"AND entity_id='{dish_id}' AND actor='manual_meal_resolver';"
+        )
+        == "1"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -564,6 +626,42 @@ def test_patch_and_delete_clone_a_coherent_day_version() -> None:
             f"FROM meals WHERE user_id='{USER_ID}' AND meal_date='{day}' AND dish_name='One';"
         )
         == "1:false,2:false,3:true"
+    )
+
+
+def test_unknown_meal_can_be_relinked_in_one_coherent_version() -> None:
+    day = "2026-08-03"
+    dish_id = psql("SELECT dish_id FROM dish_global WHERE name_normalized='amla' AND is_active;")
+    meal_id = psql(
+        f"""WITH inserted AS (
+            INSERT INTO meals (
+                user_id, meal_date, meal_type, dish_name, portions, portion_unit,
+                nutrients, resolved_from, source)
+            VALUES ('{USER_ID}', '{day}', 'snacks', 'amla', 2, 'serving',
+                    '{{}}'::jsonb, 'unknown', 'manual')
+            RETURNING id
+        ) SELECT id FROM inserted;"""
+    )
+    patched = json.loads(
+        psql(
+            f"""SELECT fn_version_meal_item(
+                '{USER_ID}', '{meal_id}',
+                '{{"food_id":"{dish_id}","category":"fruit","portion_unit":"piece",
+                   "grams":240,"nutrients":{{"protein_g":2.16}},
+                   "resolved_from":"category_global"}}'::jsonb);"""
+        )
+    )
+
+    assert patched["food_id"] == dish_id
+    assert patched["category"] == "fruit"
+    assert float(patched["grams"]) == 240
+    assert patched["version"] == 2
+    assert (
+        psql(
+            f"SELECT count(*) || ',' || min(version) FROM meals "
+            f"WHERE user_id='{USER_ID}' AND meal_date='{day}' AND is_active;"
+        )
+        == "1,2"
     )
 
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import math
+from datetime import date
 from typing import Any
 
 import pytest
 
+from app.agents.manual_meal_resolver.models import ResolvedManualDish
 from app.api.v1.meals_router import MealCreateRequest
 from app.core.exceptions import ValidationError
 from app.domain.dishes.resolve import Resolution
@@ -107,10 +109,102 @@ def test_stated_nutrients_must_be_finite_and_nonnegative(value: float) -> None:
 def test_meal_request_accepts_food_id_or_stated_nutrients_without_a_name() -> None:
     by_id = MealCreateRequest(meal_date="2026-08-16", meal_type="lunch", food_id="dish-1")
     generic = MealCreateRequest(
-        meal_date="2026-08-16",
+        meal_date=date(2026, 8, 16),
         meal_type="dinner",
         nutrients={"calories_kcal": 500},
     )
 
     assert by_id.dish_name is None
     assert generic.nutrients == {"calories_kcal": 500}
+
+
+async def test_unmatched_servings_remain_loggable_without_grams(monkeypatch) -> None:
+    async def no_match(_name: str) -> None:
+        return None
+
+    async def unresolved(**_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(service.dish_repo, "find_by_name", no_match)
+    monkeypatch.setattr(service, "run_manual_meal_resolver", unresolved)
+
+    item = await service._prepare_item(
+        user_id="user-1",
+        meal_type="snacks",
+        dish_name="Restaurant tasting portion",
+        portions=1.5,
+    )
+
+    assert item["food_id"] is None
+    assert item["portions"] == 1.5
+    assert item["portion_unit"] == "serving"
+    assert item["grams"] is None
+    assert item["nutrients"] == {}
+    assert item["resolved_from"] == "unknown"
+
+
+async def test_unmatched_meal_is_inserted_then_resolved_by_meal_id(monkeypatch) -> None:
+    async def no_match(_name: str) -> None:
+        return None
+
+    captured: dict[str, Any] = {}
+
+    async def match(**kwargs: Any) -> ResolvedManualDish:
+        captured.update(kwargs)
+        return ResolvedManualDish(
+            food_id="dish-1",
+            name="Chicken curry",
+            category="protein_main",
+            confidence="high",
+            action="match_existing",
+            updated_meal_id="meal-2",
+        )
+
+    async def next_version(_user_id: str, _meal_date: Any) -> int:
+        return 1
+
+    day_calls = 0
+
+    async def get_day(_user_id: str, _meal_date: Any) -> list[dict[str, Any]]:
+        nonlocal day_calls
+        day_calls += 1
+        return []
+
+    async def insert(row: dict[str, Any]) -> dict[str, Any]:
+        return {"id": "meal-1", **row}
+
+    async def get_meal(_user_id: str, meal_id: str) -> dict[str, Any]:
+        assert meal_id == "meal-2"
+        return {
+            "id": "meal-2",
+            "food_id": "dish-1",
+            "category": "protein_main",
+            "portions": 2,
+            "portion_unit": "serving",
+            "grams": 300,
+            "nutrients": {"protein_g": 54},
+            "resolved_from": "category_household",
+        }
+
+    monkeypatch.setattr(service.dish_repo, "find_by_name", no_match)
+    monkeypatch.setattr(service, "run_manual_meal_resolver", match)
+    monkeypatch.setattr(service.repo, "next_day_version", next_version)
+    monkeypatch.setattr(service.repo, "get_day", get_day)
+    monkeypatch.setattr(service.repo, "insert_meal", insert)
+    monkeypatch.setattr(service.repo, "get_meal", get_meal)
+
+    item = await service.add_item(
+        user_id="user-1",
+        meal_date=date(2026, 8, 16),
+        meal_type="dinner",
+        dish_name="home chicken curry",
+        portions=2,
+    )
+
+    assert day_calls == 1
+    assert captured["meal_id"] == "meal-1"
+    assert captured["servings"] == 2
+    assert item["food_id"] == "dish-1"
+    assert item["category"] == "protein_main"
+    assert item["grams"] == 300
+    assert item["nutrients"] == {"protein_g": 54}

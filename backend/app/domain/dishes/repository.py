@@ -39,7 +39,14 @@ async def search_dishes(
         q = q.eq("category", category)
     if query:
         needle = normalize(query)
-        q = q.or_(f"name_normalized.ilike.%{needle}%,name.ilike.%{query}%")
+        res = await q.order("name").execute()
+        matches = [
+            row
+            for row in (res.data or [])
+            if needle in str(row.get("name_normalized") or "")
+            or any(needle in normalize(str(alias)) for alias in (row.get("aliases") or []))
+        ]
+        return matches[offset : offset + limit], len(matches)
     res = await q.order("name").range(offset, offset + limit - 1).execute()
     return res.data or [], res.count or 0
 
@@ -60,15 +67,73 @@ async def get_dish(dish_id: str) -> dict[str, Any] | None:
 async def find_by_name(name: str) -> dict[str, Any] | None:
     """Exact normalised-name match. Used to attach food_id to free text."""
     sb = await get_supabase()
+    normalized = normalize(name)
     res = (
         await sb.table("dish_global")
         .select("*")
-        .eq("name_normalized", normalize(name))
+        .eq("name_normalized", normalized)
         .eq(_ACTIVE, True)
         .limit(1)
         .execute()
     )
-    return (res.data or [None])[0]
+    if res.data:
+        return res.data[0]
+    alias_res = (
+        await sb.table("dish_global")
+        .select("*")
+        .contains("aliases", [normalized])
+        .eq(_ACTIVE, True)
+        .limit(1)
+        .execute()
+    )
+    return (alias_res.data or [None])[0]
+
+
+async def list_active_dishes() -> list[dict[str, Any]]:
+    """Return the complete active universe for constrained model resolution."""
+    sb = await get_supabase()
+    res = await sb.table("dish_global").select("*").eq(_ACTIVE, True).order("name").execute()
+    return res.data or []
+
+
+async def list_active_categories() -> list[dict[str, Any]]:
+    sb = await get_supabase()
+    res = (
+        await sb.table("category_global").select("*").eq(_ACTIVE, True).order("category").execute()
+    )
+    return res.data or []
+
+
+async def create_global_dish(
+    *,
+    actor_user_id: str,
+    actor: str,
+    name: str,
+    category: str,
+    per_100g: dict[str, float],
+    source: str,
+    aliases: list[str] | None = None,
+) -> dict[str, Any]:
+    """Create an idempotent global dish through one audited RPC."""
+    rows = await call_rpc(
+        "fn_create_global_dish",
+        {
+            "p_name": name.strip(),
+            "p_name_normalized": normalize(name),
+            "p_category": category,
+            "p_per_100g": per_100g,
+            "p_source": source,
+            "p_actor_user_id": actor_user_id,
+            "p_actor": actor,
+            "p_aliases": sorted(
+                {normalized for value in (aliases or []) if (normalized := normalize(value))}
+            ),
+        },
+    )
+    created = rows[0] if isinstance(rows, list) and rows else rows
+    if not isinstance(created, dict):
+        raise RuntimeError("Global dish creation returned no row")
+    return created
 
 
 # ---------------------------------------------------------------------------

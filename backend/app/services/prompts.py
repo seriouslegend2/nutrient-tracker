@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from langsmith import Client, tracing_context
+from langsmith import Client, trace, tracing_context
 
 from app.config.settings import settings
 from app.utils.logger import logger
@@ -23,6 +23,7 @@ class ResolvedPrompt:
     text: str
     source: str
     version: str | None = None
+    user_template: str | None = None
 
 
 _PROMPT_CACHE: dict[str, tuple[ResolvedPrompt, float]] = {}
@@ -34,6 +35,7 @@ def langsmith_client() -> Client | None:
     return Client(
         api_url=settings.LANGSMITH_ENDPOINT,
         api_key=settings.LANGSMITH_API_KEY,
+        workspace_id=settings.LANGSMITH_WORKSPACE_ID or None,
     )
 
 
@@ -41,12 +43,24 @@ def _template_text(template: Any) -> str | None:
     if isinstance(template, str):
         return template.strip() or None
     text = getattr(template, "template", None)
+    if not isinstance(text, str):
+        text = _chat_message_template(template, "SystemMessagePromptTemplate")
     if not isinstance(text, str) or not text.strip():
         return None
     metadata = getattr(template, "metadata", None)
     if isinstance(metadata, dict) and metadata.get("nutrient_tracker_literal_braces"):
         text = text.replace("{{", "{").replace("}}", "}")
     return text.strip()
+
+
+def _chat_message_template(template: Any, message_type: str) -> str | None:
+    for message in getattr(template, "messages", []) or []:
+        if type(message).__name__ != message_type:
+            continue
+        text = getattr(getattr(message, "prompt", None), "template", None)
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    return None
 
 
 def _template_version(template: Any) -> str | None:
@@ -60,7 +74,9 @@ def _template_version(template: Any) -> str | None:
     return None
 
 
-async def resolve_prompt(name: str, fallback: str) -> ResolvedPrompt:
+async def resolve_prompt(
+    name: str, fallback: str, *, fallback_user_template: str | None = None
+) -> ResolvedPrompt:
     """Pull one prompt without ever making LangSmith a runtime dependency."""
     cached = _PROMPT_CACHE.get(name)
     if cached and time.monotonic() - cached[1] < _CACHE_TTL_SECONDS:
@@ -68,7 +84,9 @@ async def resolve_prompt(name: str, fallback: str) -> ResolvedPrompt:
 
     client = langsmith_client()
     if client is None:
-        return ResolvedPrompt(name=name, text=fallback, source="code")
+        return ResolvedPrompt(
+            name=name, text=fallback, source="code", user_template=fallback_user_template
+        )
 
     try:
         template = await asyncio.to_thread(
@@ -84,12 +102,15 @@ async def resolve_prompt(name: str, fallback: str) -> ResolvedPrompt:
             text=text,
             source="langsmith",
             version=_template_version(template),
+            user_template=_chat_message_template(template, "HumanMessagePromptTemplate"),
         )
         _PROMPT_CACHE[name] = (resolved, time.monotonic())
         return resolved
     except Exception as exc:
         logger.warning("langsmith_pull_failed prompt={} error={}", name, str(exc))
-        return ResolvedPrompt(name=name, text=fallback, source="code")
+        return ResolvedPrompt(
+            name=name, text=fallback, source="code", user_template=fallback_user_template
+        )
 
 
 def clear_prompt_cache() -> None:
@@ -98,17 +119,32 @@ def clear_prompt_cache() -> None:
 
 
 @contextmanager
-def trace_agent(agent_name: str, metadata: dict[str, Any] | None = None) -> Iterator[None]:
+def trace_agent(
+    agent_name: str,
+    metadata: dict[str, Any] | None = None,
+    inputs: dict[str, Any] | None = None,
+) -> Iterator[Any | None]:
     """Trace agent executions into the configured project without env mutation."""
     client = langsmith_client()
     if client is None or not settings.LANGSMITH_TRACING:
         yield
         return
-    with tracing_context(
-        enabled=True,
-        project_name=settings.LANGSMITH_PROJECT,
-        tags=[agent_name],
-        metadata={"agent_name": agent_name, **(metadata or {})},
-        client=client,
+    with (
+        tracing_context(
+            enabled=True,
+            project_name=settings.LANGSMITH_PROJECT,
+            tags=[agent_name],
+            metadata={"agent_name": agent_name, **(metadata or {})},
+            client=client,
+        ),
+        trace(
+            agent_name,
+            run_type="chain",
+            inputs=inputs,
+            project_name=settings.LANGSMITH_PROJECT,
+            tags=[agent_name],
+            metadata={"agent_name": agent_name, **(metadata or {})},
+            client=client,
+        ) as run,
     ):
-        yield
+        yield run
