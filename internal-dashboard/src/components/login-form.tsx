@@ -1,7 +1,6 @@
 const ERRORS: Record<string, string> = {
   auth_unavailable: 'Sign-in is temporarily unavailable. Please try again.',
-  invalid_credentials: 'The email or password is incorrect.',
-  missing_credentials: 'Enter both your email and password.',
+  google_auth_failed: 'Google sign-in could not be completed. Please try again.',
   session_expired: 'Your session expired. Sign in again to continue.',
 }
 
@@ -18,7 +17,7 @@ export function LoginForm({ next, error }: { next: string; error?: string }) {
       </p>
       <h1 className="mt-3 text-3xl font-semibold tracking-tight">Sign in</h1>
       <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-tx2)' }}>
-        Use your Nutrient Tracker account to access the internal dashboard.
+        Continue with an authorized Google account to access the internal dashboard.
       </p>
 
       {message && (
@@ -32,53 +31,22 @@ export function LoginForm({ next, error }: { next: string; error?: string }) {
         </p>
       )}
 
-      <form action="/api/auth/login" method="post" className="mt-7 space-y-5">
-        <input type="hidden" name="next" value={next} />
-
-        <div>
-          <label htmlFor="email" className="mb-2 block text-sm font-medium">
-            Email address
-          </label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            autoComplete="email"
-            autoFocus
-            required
-            aria-describedby={message ? 'login-error' : undefined}
-            className="w-full rounded-xl border bg-transparent px-3.5 py-3 outline-none focus:ring-2"
-            style={{ borderColor: 'var(--color-line)', '--tw-ring-color': 'var(--color-accent)' } as React.CSSProperties}
-          />
-        </div>
-
-        <div>
-          <label htmlFor="password" className="mb-2 block text-sm font-medium">
-            Password
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            aria-describedby={message ? 'login-error' : undefined}
-            className="w-full rounded-xl border bg-transparent px-3.5 py-3 outline-none focus:ring-2"
-            style={{ borderColor: 'var(--color-line)', '--tw-ring-color': 'var(--color-accent)' } as React.CSSProperties}
-          />
-        </div>
-
-        <button
-          type="submit"
-          className="w-full rounded-xl px-4 py-3 font-medium"
-          style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
+      <a
+        href={`/api/auth/google?next=${encodeURIComponent(next)}`}
+        className="mt-7 flex w-full items-center justify-center gap-3 rounded-xl px-4 py-3 font-medium"
+        style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
+      >
+        <span
+          className="grid h-7 w-7 place-items-center rounded-full bg-white text-base font-bold text-neutral-700"
+          aria-hidden="true"
         >
-          Sign in
-        </button>
-      </form>
+          G
+        </span>
+        Continue with Google
+      </a>
 
       <p className="mt-6 text-center text-xs leading-5" style={{ color: 'var(--color-tx2)' }}>
-        New accounts are created in the customer application.
+        Google can create the account, but only accounts granted the backend admin role can enter.
       </p>
     </main>
   )

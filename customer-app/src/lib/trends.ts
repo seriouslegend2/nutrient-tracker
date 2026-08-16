@@ -14,7 +14,15 @@ export function reportWindow(range: TrendRange, now = new Date()) {
   const config = TREND_RANGES.find((item) => item.value === range)!
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   start.setDate(start.getDate() - config.days + 1)
-  return { dateFrom: localDateISO(start), dateTo: localDateISO(now), ...config }
+  const previousEnd = new Date(start)
+  previousEnd.setDate(previousEnd.getDate() - 1)
+  const previousStart = new Date(previousEnd)
+  previousStart.setDate(previousStart.getDate() - config.days + 1)
+  return {
+    dateFrom: localDateISO(start), dateTo: localDateISO(now),
+    previousDateFrom: localDateISO(previousStart), previousDateTo: localDateISO(previousEnd),
+    ...config,
+  }
 }
 
 export function average(values: number[]): number | null {

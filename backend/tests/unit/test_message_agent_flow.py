@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 from datetime import date
 from typing import Any
 
@@ -9,10 +10,11 @@ import pytest
 
 from app.agents.media_extraction import runner as media_runner
 from app.agents.nutrition_chat.models import ChatTurn
-from app.agents.nutrition_chat.runner import _allow_mutations
+from app.agents.nutrition_chat.runner import _allow_mutations, _confirmed_follow_up
 from app.api.v1 import messages_router
 from app.core.deps import CurrentUser
 from app.core.exceptions import ValidationError
+from app.domain.meals import drafts
 from app.services import media_extraction
 from app.services.media_extraction import MEDIA_SIZE_LIMITS, ExtractionResult
 
@@ -109,8 +111,34 @@ async def test_image_runs_extraction_then_read_only_nutrition_agent(monkeypatch)
         invocation.update(kwargs)
         return ChatTurn(reply="I found dal. Review the amount below.")
 
+    async def find_by_name(_name: str) -> dict[str, Any]:
+        return {"dish_id": "dish-1", "name": "Dal", "category": "dal_gravy"}
+
+    async def list_portions(_user_id: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "category": "dal_gravy",
+                "portion_unit": "katori",
+                "portion_grams": 160,
+                "portion_count": 1.5,
+                "effective_portion_grams": 240,
+                "is_custom": True,
+            }
+        ]
+
+    async def resolve_portion(*_args: Any) -> dict[str, Any]:
+        return {
+            "portion_unit": "katori",
+            "portion_grams": 240,
+            "per_100g": {"protein_g": 10},
+            "resolved_from": "category_household",
+        }
+
     monkeypatch.setattr(messages_router, "run_media_extraction_agent", run_extraction)
     monkeypatch.setattr(messages_router, "run_nutrition_chat_agent", run_nutrition)
+    monkeypatch.setattr(drafts.dish_repo, "find_by_name", find_by_name)
+    monkeypatch.setattr(drafts.dish_repo, "list_category_portions", list_portions)
+    monkeypatch.setattr(drafts, "resolve_portion", resolve_portion)
 
     response = await messages_router.send_message(
         user=_user(), text=None, thread_id=None, file=FakeUpload()
@@ -119,7 +147,36 @@ async def test_image_runs_extraction_then_read_only_nutrition_agent(monkeypatch)
     assert response[0].status == "needs_confirmation"
     assert response[1].msg_text == "I found dal. Review the amount below."
     assert invocation["extraction_payload"]["items"][0]["name"] == "dal"
+    assert invocation["extraction_payload"]["items"][0]["food_id"] == "dish-1"
+    assert invocation["extraction_payload"]["items"][0]["nutrients"]["protein_g"] == 18
     assert "not yet confirmed" in invocation["messages"][-1]["content"]
+
+
+async def test_nutrition_label_without_items_is_not_confirmable(monkeypatch) -> None:
+    _message_store(monkeypatch)
+
+    async def run_extraction(**_kwargs):
+        return ExtractionResult(
+            text="Nutrition label with a 30 g serving",
+            payload={
+                "serving_size_g": 30,
+                "per_100g": {"protein_g": 20},
+                "source_metadata": {"kind": "nutrition_label"},
+            },
+        )
+
+    async def run_nutrition(**_kwargs):
+        return ChatTurn(reply="I read the label.")
+
+    monkeypatch.setattr(messages_router, "run_media_extraction_agent", run_extraction)
+    monkeypatch.setattr(messages_router, "run_nutrition_chat_agent", run_nutrition)
+
+    response = await messages_router.send_message(
+        user=_user(), text="Read this nutrition label", thread_id=None, file=FakeUpload()
+    )
+
+    assert response[0].status == "confirmed"
+    assert response[0].payload["source_metadata"]["kind"] == "nutrition_label"
 
 
 async def test_pdf_rows_become_reviewable_meal_items(monkeypatch) -> None:
@@ -276,6 +333,77 @@ async def test_confirmation_honors_selected_date_for_pdf_items(monkeypatch) -> N
     assert captured[1]["audit"]["new_value"]["meal_date"] == "2026-08-16"
 
 
+async def test_confirmation_rejects_inactive_food_id_before_creating_meals(monkeypatch) -> None:
+    message = {
+        "id": "message-1",
+        "user_id": "user-1",
+        "thread_id": "thread-1",
+        "correlation_id": "correlation-1",
+        "msg_type": "image",
+        "status": "needs_confirmation",
+        "payload": {"items": [{"name": "Dal", "estimated_mass_g": 180}]},
+    }
+
+    async def get_message(_user_id: str, _message_id: str) -> dict[str, Any]:
+        return message
+
+    async def get_dish(_food_id: str) -> None:
+        return None
+
+    async def add_item(**_kwargs):
+        pytest.fail("invalid food IDs must be rejected before meal creation")
+
+    monkeypatch.setattr(messages_router.message_repo, "get_message", get_message)
+    monkeypatch.setattr(messages_router.dish_repo, "get_dish", get_dish)
+    monkeypatch.setattr(messages_router.meals_service, "add_item", add_item)
+    body = messages_router.ConfirmRequest(
+        meal_date=date(2026, 8, 16),
+        meal_type="dinner",
+        items=[{"dish_name": "Dal", "food_id": " inactive-id ", "grams": 180}],
+    )
+
+    with pytest.raises(ValidationError) as error:
+        await messages_router.confirm_message("message-1", body, _user())
+
+    assert error.value.code == "DISH_NOT_FOUND"
+    assert error.value.context == {"food_id": "inactive-id"}
+
+
+async def test_discard_closes_draft_without_logging(monkeypatch) -> None:
+    message = {
+        "id": "message-1",
+        "user_id": "user-1",
+        "status": "needs_confirmation",
+    }
+    patches: list[dict[str, Any]] = []
+
+    async def get_message(_user_id: str, _message_id: str) -> dict[str, Any]:
+        return message
+
+    async def update_message(**kwargs) -> dict[str, Any]:
+        patches.append(kwargs["patch"])
+        return {**message, **kwargs["patch"]}
+
+    monkeypatch.setattr(messages_router.message_repo, "get_message", get_message)
+    monkeypatch.setattr(messages_router.message_repo, "update_message", update_message)
+
+    response = await messages_router.discard_message("message-1", _user())
+
+    assert response.status_code == 204
+    assert patches == [{"status": "not_applicable"}]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("grams", 0), ("grams", math.inf), ("grams", math.nan), ("portions", -1)],
+)
+def test_confirmation_amounts_must_be_positive_and_finite(field: str, value: float) -> None:
+    item = {"dish_name": "Dal", field: value}
+
+    with pytest.raises(ValueError):
+        messages_router.ConfirmationItem(**item)
+
+
 async def test_agent_run_persistence_failure_does_not_fail_media_result(monkeypatch) -> None:
     class FakeAgent:
         async def ainvoke(self, state, *, config, context):
@@ -321,6 +449,34 @@ def test_ambiguous_text_cannot_mutate_until_explicit_confirmation() -> None:
             {"role": "user", "content": "2 rotis for lunch"},
             {"role": "assistant", "content": "Should I log that?"},
             {"role": "user", "content": "yes"},
+        ],
+        payload={},
+    )
+
+
+def test_numeric_nutrition_entry_requires_a_separate_confirmation_turn() -> None:
+    assert not _confirmed_follow_up(
+        [{"role": "user", "content": "Log 500 calories for dinner"}], payload={}
+    )
+    assert _confirmed_follow_up(
+        [
+            {"role": "user", "content": "Log 500 calories for dinner"},
+            {"role": "assistant", "content": "Log Dinner item with 500 kcal?"},
+            {"role": "user", "content": "confirm"},
+        ],
+        payload={},
+    )
+    assert _confirmed_follow_up(
+        [
+            {"role": "assistant", "content": "Log 25 g protein for Dinner item?"},
+            {"role": "user", "content": "yes, go ahead"},
+        ],
+        payload={},
+    )
+    assert not _confirmed_follow_up(
+        [
+            {"role": "assistant", "content": "Remove the dinner entry?"},
+            {"role": "user", "content": "confirm"},
         ],
         payload={},
     )

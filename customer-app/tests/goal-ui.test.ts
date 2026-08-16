@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildGoalPayload } from '../src/components/goal-setup'
-import { goalStatusText } from '../src/components/home-client'
+import { calendarAchievement, goalStatusText } from '../src/components/home-client'
 
 describe('goal builder payloads', () => {
   const end = '2026-12-31'
@@ -43,5 +43,17 @@ describe('goal status language', () => {
   it('keeps missing observations distinct from success', () => {
     expect(goalStatusText('no_data', 'at_least')).toBe('No data')
     expect(goalStatusText('met', 'at_least')).toBe('Goal met')
+  })
+
+  it('counts reached hydration days only from completed calendar statuses', () => {
+    const calendar = [
+      { date: '2026-08-12', status: 'met' as const, actual: 2200, target: 2000 },
+      { date: '2026-08-13', status: 'below' as const, actual: 1500, target: 2000 },
+      { date: '2026-08-14', status: 'no_data' as const, actual: null, target: 2000 },
+      { date: '2026-08-15', status: 'in_progress' as const, actual: 500, target: 2000 },
+      { date: '2026-08-16', status: 'future' as const, actual: null, target: 2000 },
+    ]
+
+    expect(calendarAchievement(calendar, '2026-08-15')).toEqual({ reached: 1, elapsed: 4 })
   })
 })

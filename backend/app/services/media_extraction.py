@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import statistics
@@ -389,17 +390,21 @@ async def extract_media(
                     **_usage_totals([provider_output]),
                 )
 
-            runs: list[dict[str, Any]] = []
-            provider_outputs: list[ProviderOutput] = []
-            for _ in range(max(1, samples)):
-                prompt = FOOD_PHOTO_PROMPT
-                if text:
-                    prompt += f"\n\nThe user added this context: {text}"
-                provider_output = _provider_output(
-                    await _call_openai_media(prompt, data_b64 or "", mime_type),
-                    fallback_model=settings.VISION_MODEL,
+            prompt = FOOD_PHOTO_PROMPT
+            if text:
+                prompt += f"\n\nThe user added this context: {text}"
+            responses = await asyncio.gather(
+                *(
+                    _call_openai_media(prompt, data_b64 or "", mime_type)
+                    for _ in range(max(1, samples))
                 )
-                provider_outputs.append(provider_output)
+            )
+            provider_outputs = [
+                _provider_output(response, fallback_model=settings.VISION_MODEL)
+                for response in responses
+            ]
+            runs: list[dict[str, Any]] = []
+            for provider_output in provider_outputs:
                 parsed = _parse_json(provider_output.text)
                 if parsed:
                     runs.append(parsed)

@@ -62,7 +62,7 @@ test.describe.serial('customer non-agent journey', () => {
     await page.getByLabel('Anything you avoid?').fill('peanuts')
     await page.getByRole('button', { name: 'Continue' }).click()
 
-    await expect(page.getByRole('heading', { name: 'Your portions' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Your usual portions' })).toBeVisible()
     await page.getByText('1 katori', { exact: true }).first().click()
     await page.getByText('1 bowl', { exact: true }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
@@ -85,8 +85,24 @@ test.describe.serial('customer non-agent journey', () => {
     await page.getByRole('button', { name: 'Add a goal' }).click()
     await expect(page).toHaveURL(`${CUSTOMER_URL}/home`)
     await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Turn a plate into a draft' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Take meal photo' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Upload PDF' })).toBeVisible()
+    await expect(page.locator('input[type="file"][capture="environment"]')).toHaveAttribute('accept', 'image/*')
+    await expect(page.locator('input[type="file"][accept="application/pdf"]')).toHaveCount(1)
+    const todayNutrition = page.getByRole('region', { name: "Today's nutrition" })
+    await expect(todayNutrition.getByText('consumed today')).toBeVisible()
+    await expect(todayNutrition).not.toContainText('left today')
     await expect(page.getByRole('heading', { name: 'Goals' })).toBeVisible()
-    await expect(page.getByRole('tab', { name: 'Body weight' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: /Lose 3 kg/ })).toBeVisible()
+    const goalPanel = page.getByRole('tabpanel')
+    await expect(goalPanel.getByRole('heading', { name: 'Calories', exact: true })).toBeVisible()
+    await expect(goalPanel.getByRole('heading', { name: 'Protein', exact: true })).toBeVisible()
+    await expect(goalPanel.getByRole('heading', { name: 'Carbs', exact: true })).toBeVisible()
+    await expect(goalPanel.getByRole('heading', { name: 'Fat', exact: true })).toBeVisible()
+    await expect(goalPanel.getByRole('progressbar')).toHaveCount(8)
+    await expect(goalPanel.getByText('Today', { exact: true }).first()).toBeVisible()
+    await expect(goalPanel.getByText('Period', { exact: true }).first()).toBeVisible()
     await evidence(page, testInfo, 'customer-04-home-with-goal')
   })
 
@@ -106,7 +122,12 @@ test.describe.serial('customer non-agent journey', () => {
     await page.getByLabel('Water (ml per day)').fill('2000')
     await page.getByRole('button', { name: 'Preview goal' }).click()
     await page.getByRole('button', { name: 'Add a goal' }).click()
-    await expect(page.getByRole('tab', { name: 'Daily hydration' })).toBeVisible()
+    const hydrationTab = page.getByRole('tab', { name: 'Daily hydration' })
+    await expect(hydrationTab).toBeVisible()
+    await hydrationTab.click()
+    const hydrationPanel = page.getByRole('tabpanel')
+    await expect(hydrationPanel.getByRole('heading', { name: 'Daily goal calendar' })).toBeVisible()
+    await expect(hydrationPanel.getByText(/elapsed days reached/)).toBeVisible()
 
     await page.goto(`${CUSTOMER_URL}/goals/new`)
     await page.getByRole('radio', { name: /Training/ }).click()
@@ -120,7 +141,7 @@ test.describe.serial('customer non-agent journey', () => {
     await trainingTab.click()
     await page.getByRole('button', { name: 'I trained today' }).click()
     await expect(page.getByRole('button', { name: 'Training checked in today' })).toBeDisabled()
-    await expect(page.getByText(/current streak/)).toBeVisible()
+    await expect(page.getByText(/weeks? streak/)).toBeVisible()
     await evidence(page, testInfo, 'customer-05-multiple-goals-training-check-in')
   })
 
@@ -149,7 +170,7 @@ test.describe.serial('customer non-agent journey', () => {
     await evidence(page, testInfo, 'customer-05-paneer-serving-created')
     let rowButton = row.getByRole('button', { name: new RegExp(selectedDish) })
     await rowButton.click()
-    await row.getByRole('button', { name: 'Edit portion' }).click()
+    await row.getByRole('button', { name: 'Edit this meal', exact: true }).click()
     await row.getByLabel('Servings').fill('2')
     const updateResponse = waitForMealMutation(page, 'PATCH')
     await row.getByRole('button', { name: 'Save', exact: true }).click()
@@ -186,7 +207,7 @@ test.describe.serial('customer non-agent journey', () => {
     await expect(row).toBeVisible()
     let rowButton = row.getByRole('button', { name: new RegExp(escapeRegex(selected)) })
     await rowButton.click()
-    await row.getByRole('button', { name: 'Edit portion' }).click()
+    await row.getByRole('button', { name: 'Edit this meal', exact: true }).click()
     await row.getByLabel('Servings').fill('2')
     const updateResponse = waitForMealMutation(page, 'PATCH')
     await row.getByRole('button', { name: 'Save', exact: true }).click()
@@ -214,7 +235,11 @@ test.describe.serial('customer non-agent journey', () => {
   test('analytics renders day, week, and month non-agent reports', async ({}, testInfo) => {
     await page.goto(`${CUSTOMER_URL}/analytics`)
     await expect(page.getByRole('heading', { name: 'Trends' })).toBeVisible()
-    for (const heading of ['Calorie intake', 'Macros', 'Micronutrients']) {
+    for (const heading of [
+      'Calorie intake', 'Goal vs actual', 'Meal slots and timing', 'Macros',
+      'Fiber and sodium', 'Micronutrients', 'Water recorded', 'Weight and waist',
+      'Data quality and sources',
+    ]) {
       await expect(page.getByRole('heading', { name: heading })).toBeVisible()
     }
     await page.getByRole('button', { name: 'week' }).click()
@@ -237,14 +262,16 @@ test.describe.serial('customer non-agent journey', () => {
     await expect(page.getByPlaceholder("Log today's weight (kg)")).toHaveValue('')
 
     const portionButton = page.getByRole('button', { name: /Dal \/ gravy/ }).first()
+    await expect(portionButton).toContainText('Fixed category unit: 1 katori = 200 g')
     await portionButton.click()
     const portionRow = portionButton.locator('..')
-    const grams = portionRow.getByLabel('Grams')
-    const current = Number(await grams.inputValue())
-    await grams.fill(String(current + 1))
+    await expect(portionRow.getByLabel(/Grams/)).toHaveCount(0)
+    const count = portionRow.getByLabel('Usual serving count (katori)')
+    const current = Number(await count.inputValue())
+    await count.fill(String(current + 0.5))
     await portionRow.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(portionButton).toContainText('Your size')
-    await expect(portionButton).toContainText(`${current + 1} g`)
+    await expect(portionButton).toContainText('Your count')
+    await expect(portionButton).toContainText(`Your usual amount: ${current + 0.5} katori = ${(current + 0.5) * 200} g`)
 
     const deactivate = page.getByRole('button', { name: 'Deactivate' }).first()
     await expect(deactivate).toBeVisible()

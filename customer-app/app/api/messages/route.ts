@@ -3,4 +3,6 @@
 import { API } from '@/lib/config/api'
 import { proxyRoute } from '@/lib/proxy'
 
-export const { GET, POST, PUT, PATCH, DELETE } = proxyRoute(API.paths.messages)
+export const { GET, POST, PUT, PATCH, DELETE } = proxyRoute(API.paths.messages, {
+  timeout: API.timeouts.long,
+})

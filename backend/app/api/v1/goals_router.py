@@ -79,6 +79,13 @@ class ProgressValue(BaseModel):
     unit: str
     direction: str | None = None
     progress_pct: float | None = None
+    overall_progress_pct: float | None = None
+    target_to_date: float | None = None
+    baseline: float | None = None
+    starts_on: date | None = None
+    ends_on: date | None = None
+    days_elapsed: int | None = None
+    total_days: int | None = None
     completed_buckets: int | None = None
     total_buckets: int | None = None
 
@@ -96,6 +103,15 @@ class CalendarDayResponse(BaseModel):
     target: float
 
 
+class GoalMetricProgress(BaseModel):
+    metric: str
+    label: str
+    unit: str
+    direction: str
+    today: ProgressValue
+    period: ProgressValue
+
+
 class GoalProgressSummary(BaseModel):
     goal_id: str
     kind: str
@@ -106,7 +122,9 @@ class GoalProgressSummary(BaseModel):
     starts_on: date
     ends_on: date
     today: ProgressValue
+    current_week: ProgressValue
     period: ProgressValue
+    metrics: list[GoalMetricProgress]
     streak: StreakResponse
     calendar: list[CalendarDayResponse]
 

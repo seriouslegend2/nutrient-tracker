@@ -19,7 +19,7 @@ from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.core.deps import CurrentUser, get_current_user
 from app.core.exceptions import NotFoundError
@@ -55,13 +55,20 @@ class MealResponse(BaseModel):
 class MealCreateRequest(BaseModel):
     meal_date: date
     meal_type: str = Field(..., description="breakfast|brunch|lunch|snacks|dinner|misc")
-    dish_name: str = Field(..., min_length=1)
+    dish_name: str | None = Field(None, min_length=1)
     food_id: str | None = Field(None, description="Optional: free text is first-class")
     portions: float = Field(1.0, gt=0, description="The multiplier: 1.5 katori, 3 rotis")
     grams: float | None = Field(None, ge=0, description="Overrides the lookup chain")
     portion_unit: str | None = None
     slot_time: str | None = None
     note: str | None = None
+    nutrients: dict[str, float] | None = None
+
+    @model_validator(mode="after")
+    def require_dish_or_nutrients(self) -> MealCreateRequest:
+        if not (self.dish_name or "").strip() and not self.food_id and not self.nutrients:
+            raise ValueError("Provide a dish name, food ID, or at least one nutrient value")
+        return self
 
 
 class MealPatchRequest(BaseModel):
@@ -72,13 +79,20 @@ class MealPatchRequest(BaseModel):
 
 class DayItemRequest(BaseModel):
     meal_type: str
-    dish_name: str
+    dish_name: str | None = None
     food_id: str | None = None
     portions: float = 1.0
     grams: float | None = None
     portion_unit: str | None = None
     slot_time: str | None = None
     note: str | None = None
+    nutrients: dict[str, float] | None = None
+
+    @model_validator(mode="after")
+    def require_dish_or_nutrients(self) -> DayItemRequest:
+        if not (self.dish_name or "").strip() and not self.food_id and not self.nutrients:
+            raise ValueError("Provide a dish name, food ID, or at least one nutrient value")
+        return self
 
 
 class DayReplaceRequest(BaseModel):
@@ -146,6 +160,7 @@ async def create_meal(
         portion_unit=body.portion_unit,
         slot_time=body.slot_time,
         note=body.note,
+        nutrients=body.nutrients,
     )
     return MealResponse(**row)
 

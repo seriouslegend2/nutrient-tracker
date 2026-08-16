@@ -1,7 +1,9 @@
 """Contract tests that walk the generated OpenAPI document."""
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
+from app.api.v1.profile_router import CategoryPortionRequest
 from app.main import app
 
 
@@ -61,3 +63,12 @@ def test_every_route_declares_a_response_model(schema):
             if not ({"200", "201", "204"} & set(responses)):
                 missing.append(f"{method.upper()} {path}")
     assert missing == [], "Routes with no success response: " + ", ".join(missing)
+
+
+@pytest.mark.unit
+def test_category_portion_api_accepts_only_the_usual_count() -> None:
+    assert CategoryPortionRequest(portion_count=1.5).portion_count == 1.5
+    with pytest.raises(PydanticValidationError):
+        CategoryPortionRequest.model_validate(
+            {"portion_count": 1.5, "portion_grams": 250, "portion_unit": "katori"}
+        )

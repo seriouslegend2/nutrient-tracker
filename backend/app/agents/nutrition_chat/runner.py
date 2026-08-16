@@ -22,9 +22,14 @@ _EXPLICIT_CONFIRMATIONS = {
     "confirm",
     "confirmed",
     "go ahead",
+    "yes go ahead",
+    "yes, go ahead",
     "do it",
     "please do",
 }
+_NUMERIC_NUTRITION_PROPOSAL = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:kcal|calories?|g|grams?)\b", re.IGNORECASE
+)
 
 
 def _allow_mutations(messages: list[dict[str, str]], payload: dict[str, Any]) -> bool:
@@ -44,6 +49,32 @@ def _allow_mutations(messages: list[dict[str, str]], payload: dict[str, Any]) ->
         return True
     has_prior_assistant = any(message.get("role") == "assistant" for message in messages[:-1])
     return has_prior_assistant and normalized in _EXPLICIT_CONFIRMATIONS
+
+
+def _confirmed_follow_up(messages: list[dict[str, str]], payload: dict[str, Any]) -> bool:
+    """Numeric nutrient writes require a separate confirmation turn."""
+    if payload:
+        return False
+    latest = next(
+        (
+            message.get("content", "")
+            for message in reversed(messages)
+            if message.get("role") == "user"
+        ),
+        "",
+    )
+    normalized = latest.strip().lower().rstrip(".!?")
+    prior_assistant = next(
+        (
+            message.get("content", "")
+            for message in reversed(messages[:-1])
+            if message.get("role") == "assistant"
+        ),
+        "",
+    )
+    return normalized in _EXPLICIT_CONFIRMATIONS and bool(
+        _NUMERIC_NUTRITION_PROPOSAL.search(prior_assistant)
+    )
 
 
 def _usage(result: dict[str, Any]) -> tuple[int | None, int | None, float | None]:
@@ -95,7 +126,10 @@ async def run_nutrition_chat_agent(
     try:
         from app.agents.nutrition_chat.agent import build_nutrition_chat_agent
 
-        agent = await build_nutrition_chat_agent(allow_mutations=allow_mutations)
+        agent = await build_nutrition_chat_agent(
+            allow_mutations=allow_mutations,
+            allow_nutrition_entry=_confirmed_follow_up(messages, payload),
+        )
         result = await agent.ainvoke(
             {
                 "messages": messages,

@@ -13,7 +13,7 @@ from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.domain.dishes import repository as dish_repo
 from app.domain.meals import service as meals_service
@@ -72,6 +72,79 @@ async def log_dishes(
         user_id,
         dish_name,
         row.get("resolved_from"),
+    )
+    return {"status": "OK", "meal": row}
+
+
+class LogNutritionEntryInput(BaseModel):
+    meal_date: str = Field(..., description="YYYY-MM-DD")
+    meal_type: str = Field(..., description="breakfast|brunch|lunch|snacks|dinner|misc")
+    label: str | None = Field(None, description="Optional display label; defaults to the meal slot")
+    calories_kcal: float | None = Field(None, ge=0)
+    protein_g: float | None = Field(None, ge=0)
+    carbs_g: float | None = Field(None, ge=0)
+    fat_g: float | None = Field(None, ge=0)
+    fiber_g: float | None = Field(None, ge=0)
+
+    @model_validator(mode="after")
+    def require_nutrition(self) -> LogNutritionEntryInput:
+        if all(
+            value is None
+            for value in (
+                self.calories_kcal,
+                self.protein_g,
+                self.carbs_g,
+                self.fat_g,
+                self.fiber_g,
+            )
+        ):
+            raise ValueError("At least one stated nutrient value is required")
+        return self
+
+
+@tool(args_schema=LogNutritionEntryInput)
+async def log_nutrition_entry(
+    meal_date: str,
+    meal_type: str,
+    label: str | None = None,
+    calories_kcal: float | None = None,
+    protein_g: float | None = None,
+    carbs_g: float | None = None,
+    fat_g: float | None = None,
+    fiber_g: float | None = None,
+    config: RunnableConfig = None,
+) -> dict[str, Any]:
+    """Log user-stated nutrient totals when the dish itself is unknown.
+
+    Use only numbers stated by the user or an exact active-goal target the user
+    explicitly says this meal fulfilled. Never estimate a missing nutrient.
+    """
+    user_id = _user_id(config)
+    if not user_id:
+        return {"status": "ERROR", "message": "No authenticated user in context"}
+
+    from datetime import date as date_cls
+
+    nutrients = {
+        key: value
+        for key, value in {
+            "calories_kcal": calories_kcal,
+            "protein_g": protein_g,
+            "carbs_g": carbs_g,
+            "fat_g": fat_g,
+            "fiber_g": fiber_g,
+        }.items()
+        if value is not None
+    }
+    row = await meals_service.add_item(
+        user_id=user_id,
+        meal_date=date_cls.fromisoformat(meal_date),
+        meal_type=meal_type,
+        dish_name=label,
+        portions=1,
+        portion_unit="serving",
+        source="chat",
+        nutrients=nutrients,
     )
     return {"status": "OK", "meal": row}
 
@@ -167,21 +240,31 @@ class GetGoalStatusInput(BaseModel):
 
 @tool
 async def get_goal_status(config: RunnableConfig = None) -> dict[str, Any]:
-    """Get the user's current active goal and progress against it."""
+    """Get every active goal, its resolved targets, and current progress."""
     user_id = _user_id(config)
     if not user_id:
         return {"status": "ERROR", "message": "No authenticated user in context"}
-    from app.domain.goals import service as goals_service
-
-    goal = await goals_service.get_active_goal(user_id)
-    if not goal:
-        return {"status": "OK", "goal": None, "message": "No active goal set"}
     from datetime import date, timedelta
 
-    progress = await goals_service.progress(
-        user_id, goal["goal_id"], date.today() - timedelta(days=6), date.today()
+    from app.domain.goals import service as goals_service
+
+    today = date.today()
+    summary = await goals_service.progress_summary(user_id, today)
+    if not summary["goals"]:
+        return {"status": "OK", "goal": None, "active_goals": [], "message": "No active goal set"}
+
+    goal = await goals_service.get_active_goal(user_id)
+    progress = (
+        await goals_service.progress(user_id, goal["goal_id"], today - timedelta(days=6), today)
+        if goal
+        else None
     )
-    return {"status": "OK", "goal": goal, "progress": progress}
+    return {
+        "status": "OK",
+        "goal": goal,
+        "active_goals": summary["goals"],
+        "progress": progress,
+    }
 
 
 class SetGoalInput(BaseModel):
@@ -271,24 +354,22 @@ async def log_weight(weight_kg: float, config: RunnableConfig = None) -> dict[st
 
 class SetPortionDefaultInput(BaseModel):
     category: str = Field(..., description="e.g. dal_gravy, flatbread, protein_main")
-    portion_unit: str = Field(..., description="e.g. katori, piece, g")
-    portion_grams: float = Field(..., description="Grams per unit")
-    portion_count: float = Field(1.0, description="How many units make one portion")
+    portion_count: float = Field(
+        ..., gt=0, le=20, description="How many fixed category units make the usual serving"
+    )
 
 
 @tool(args_schema=SetPortionDefaultInput)
 async def set_portion_default(
     category: str,
-    portion_unit: str,
-    portion_grams: float,
-    portion_count: float = 1.0,
+    portion_count: float,
     config: RunnableConfig = None,
 ) -> dict[str, Any]:
-    """Set the user's own portion size for a food category.
+    """Set what the user usually takes for a food category.
 
-    This is lookup level 3 - it applies to every food in that category from
-    now on, so use it when a user corrects "my katori is bigger" rather than
-    correcting one dish at a time.
+    The category unit and grams are fixed. This changes only how many fixed
+    units make the user's usual serving. Never use it when they ate more or
+    fewer servings in one specific meal.
     """
     user_id = _user_id(config)
     if not user_id:
@@ -296,8 +377,6 @@ async def set_portion_default(
     row = await dish_repo.set_category_household(
         user_id=user_id,
         category=category,
-        portion_unit=portion_unit,
-        portion_grams=portion_grams,
         portion_count=portion_count,
         source="chat",
     )
@@ -351,4 +430,6 @@ mutation_tools = [
     identify_unknown_item,
 ]
 
-tools = [*read_tools, *mutation_tools]
+confirmation_required_tools = [log_nutrition_entry]
+
+tools = [*read_tools, *mutation_tools, *confirmation_required_tools]

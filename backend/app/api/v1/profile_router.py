@@ -9,8 +9,7 @@ Endpoints (mounted under /api/v1):
     GET   /me/preferences              Everything we know about you, paginated
     PUT   /me/preferences/{topic}      Edit a cluster; mints a new version
     GET   /me/portions                 My category portion profile
-    PUT   /me/portions/{category}      Set my portion for a category
-    PUT   /me/dishes/{id}/portion      Correct one specific dish
+    PUT   /me/portions/{category}      Set my usual count for a category
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from datetime import UTC, date
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.deps import CurrentUser, get_current_user
 from app.core.pagination import Page, PaginationParams, pagination
@@ -53,15 +52,9 @@ class ProfilePatchRequest(BaseModel):
 
 
 class CategoryPortionRequest(BaseModel):
-    portion_unit: str
-    portion_grams: float = Field(..., gt=0)
-    portion_count: float = Field(1.0, gt=0)
+    model_config = ConfigDict(extra="forbid")
 
-
-class DishPortionRequest(BaseModel):
-    portion_unit: str
-    portion_grams: float = Field(..., gt=0)
-    note: str | None = None
+    portion_count: float = Field(..., gt=0, le=20)
 
 
 class BodyMetricRequest(BaseModel):
@@ -141,8 +134,6 @@ async def submit_onboarding(
         await dish_repo.set_category_household(
             user_id=user.id,
             category=category,
-            portion_unit=base["portion_unit"],
-            portion_grams=values.get("grams", base["global_portion_grams"]),
             portion_count=values.get("count", base["global_portion_count"]),
         )
         saved += 1
@@ -215,28 +206,10 @@ async def set_category_portion(
     body: CategoryPortionRequest,
     user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Lookup level ③. Editable forever, from About, a meal row, or chat."""
+    """Set how many fixed category units make the user's usual serving."""
     return await dish_repo.set_category_household(
         user_id=user.id,
         category=category,
-        portion_unit=body.portion_unit,
-        portion_grams=body.portion_grams,
         portion_count=body.portion_count,
         source="manual",
-    )
-
-
-@router.put("/dishes/{dish_id}/portion")
-async def set_dish_portion(
-    dish_id: str,
-    body: DishPortionRequest,
-    user: CurrentUser = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Lookup level ②: a per-dish correction. Rare by design."""
-    return await dish_repo.set_dish_household(
-        user_id=user.id,
-        dish_id=dish_id,
-        portion_unit=body.portion_unit,
-        portion_grams=body.portion_grams,
-        note=body.note,
     )

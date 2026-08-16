@@ -15,17 +15,19 @@ from __future__ import annotations
 import base64
 import json
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.agents.media_extraction import run_media_extraction_agent
 from app.agents.nutrition_chat.runner import run_nutrition_chat_agent
 from app.core.deps import CurrentUser, get_current_user
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.pagination import Page, PaginationParams, pagination
+from app.domain.dishes import repository as dish_repo
 from app.domain.meals import service as meals_service
+from app.domain.meals.drafts import enrich_media_payload
 from app.domain.messages import repository as message_repo
 from app.services.media_extraction import validate_media_upload
 from app.utils.logger import logger
@@ -59,11 +61,38 @@ class MessageResponse(BaseModel):
     created_at: str
 
 
+class ConfirmationItem(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
+
+    dish_name: str = Field(..., min_length=1)
+    food_id: str | None = None
+    grams: float | None = Field(None, gt=0)
+    portions: float = Field(1.0, gt=0)
+    portion_unit: str | None = None
+    confidence: str | None = None
+
+    @field_validator("dish_name")
+    @classmethod
+    def normalise_dish_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Dish name cannot be blank")
+        return value
+
+    @field_validator("food_id", "portion_unit", "confidence", mode="before")
+    @classmethod
+    def normalise_optional_text(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        value = str(value).strip()
+        return value or None
+
+
 class ConfirmRequest(BaseModel):
     meal_date: date
-    meal_type: str
+    meal_type: Literal["breakfast", "brunch", "lunch", "snacks", "dinner", "misc"]
     # The user's edits win over the model's draft.
-    items: list[dict[str, Any]] = Field(default_factory=list)
+    items: list[ConfirmationItem] = Field(default_factory=list)
 
 
 def _agent_messages(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -190,9 +219,16 @@ async def send_message(
         normalized_text = extraction.as_tagged(mtype)
         if text:
             normalized_text = f"{normalized_text}\n\nUser note: {text}".strip()
-        extraction_payload = extraction.payload
+        extraction_payload = await enrich_media_payload(
+            user_id=user.id, payload=extraction.payload
+        )
 
-    status = "needs_confirmation" if extraction_payload else "confirmed"
+    meal_items = extraction_payload.get("items")
+    status = (
+        "needs_confirmation"
+        if isinstance(meal_items, list) and bool(meal_items)
+        else "confirmed"
+    )
     updated = await message_repo.update_message(
         user_id=user.id,
         message_id=inbound["id"],
@@ -268,6 +304,27 @@ async def get_message(
     return MessageResponse(**message)
 
 
+@router.post("/{message_id}/discard", status_code=204)
+async def discard_message(
+    message_id: str, user: CurrentUser = Depends(get_current_user)
+) -> Response:
+    """Close a review draft without writing meal rows."""
+    message = await message_repo.get_message(user.id, message_id)
+    if not message:
+        raise NotFoundError("Message not found", code="MESSAGE_NOT_FOUND")
+    if message["status"] == "confirmed":
+        raise ConflictError(
+            "This draft has already been logged.", code="MESSAGE_ALREADY_CONFIRMED"
+        )
+    if message["status"] == "needs_confirmation":
+        await message_repo.update_message(
+            user_id=user.id,
+            message_id=message_id,
+            patch={"status": "not_applicable"},
+        )
+    return Response(status_code=204)
+
+
 @router.post("/{message_id}/confirm")
 async def confirm_message(
     message_id: str,
@@ -285,21 +342,22 @@ async def confirm_message(
             code="MESSAGE_NOT_CONFIRMABLE",
         )
 
-    items = body.items or []
+    items = list(body.items)
     if not items:
         for item in (message.get("payload") or {}).get("items", []):
-            grams = item.get("estimated_mass_g")
+            grams = item.get("total_grams") or item.get("estimated_mass_g")
             confidence = item.get("confidence")
             if isinstance(confidence, dict):
                 confidence = confidence.get("mass") or confidence.get("identity")
             items.append(
-                {
-                    "dish_name": item.get("name") or "Unknown item",
-                    "grams": grams,
-                    "portions": 1.0 if grams is not None else item.get("quantity") or 1.0,
-                    "portion_unit": "g" if grams is not None else item.get("unit"),
-                    "confidence": confidence,
-                }
+                ConfirmationItem(
+                    dish_name=item.get("resolved_name") or item.get("name") or "Unknown item",
+                    food_id=item.get("food_id"),
+                    grams=grams,
+                    portions=1.0 if grams is not None else item.get("quantity") or 1.0,
+                    portion_unit="g" if grams is not None else item.get("unit"),
+                    confidence=confidence,
+                )
             )
     if not items:
         raise ValidationError(
@@ -316,18 +374,27 @@ async def confirm_message(
         "food_diary_pdf": "pdf_import",
     }.get(source_kind, "photo" if message["msg_type"] == "image" else "pdf_import")
     for item in items:
+        if item.food_id and not await dish_repo.get_dish(item.food_id):
+            raise ValidationError(
+                "The selected dish does not exist or is no longer active.",
+                code="DISH_NOT_FOUND",
+                suggested_action="Choose an active dish and confirm again.",
+                context={"food_id": item.food_id},
+            )
+
+    for item in items:
         created.append(
             await meals_service.add_item(
                 user_id=user.id,
                 meal_date=body.meal_date,
                 meal_type=body.meal_type,
-                dish_name=item["dish_name"],
-                food_id=item.get("food_id"),
-                grams=item.get("grams"),
-                portions=item.get("portions", 1.0),
-                portion_unit=item.get("portion_unit"),
+                dish_name=item.dish_name,
+                food_id=item.food_id,
+                grams=item.grams,
+                portions=item.portions,
+                portion_unit=item.portion_unit,
                 source=source,
-                confidence=item.get("confidence"),
+                confidence=item.confidence,
             )
         )
 

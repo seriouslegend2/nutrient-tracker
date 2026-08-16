@@ -4,9 +4,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
 import { useRef, useState } from 'react'
 
+import { MealDraftReview } from '@/components/meal-draft-review'
 import { BottomNav } from '@/components/nav'
 import { api, type Message } from '@/lib/api-client'
-import { localDateISO } from '@/lib/date'
+import { isISODate, localDateISO } from '@/lib/date'
 
 /**
  * Text runs through the nutrition agent. Photos and voice notes run through
@@ -16,10 +17,12 @@ export function AgentClient() {
   const params = useSearchParams()
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
+  const pdfRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
   const [text, setText] = useState('')
   const [aiError, setAiError] = useState('')
-  const mealDate = params.get('date') ?? localDateISO()
+  const requestedDate = params.get('date')
+  const mealDate = isISODate(requestedDate) ? requestedDate : localDateISO()
 
   const { data: messages } = useQuery({
     queryKey: ['messages'], queryFn: () => api.messages(),
@@ -40,8 +43,12 @@ export function AgentClient() {
         message.msg_text?.toLowerCase().includes('ai features are disabled')
       )
       setAiError(disabled?.msg_text ?? '')
-      if (fileRef.current) fileRef.current.value = ''
       qc.invalidateQueries({ queryKey: ['messages'] })
+    },
+    onSettled: () => {
+      if (fileRef.current) fileRef.current.value = ''
+      if (pdfRef.current) pdfRef.current.value = ''
+      if (cameraRef.current) cameraRef.current.value = ''
     },
   })
 
@@ -89,7 +96,7 @@ export function AgentClient() {
         <input
           ref={fileRef}
           type="file"
-          accept="image/*,audio/*,application/pdf"
+          accept="image/*,audio/*"
           hidden
           onChange={(e) => {
             const file = e.target.files?.[0]
@@ -97,6 +104,11 @@ export function AgentClient() {
           }}
         />
         <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) send.mutate({ body: text, file })
+          }} />
+        <input ref={pdfRef} type="file" accept="application/pdf" hidden
           onChange={(e) => {
             const file = e.target.files?.[0]
             if (file) send.mutate({ body: text, file })
@@ -124,11 +136,14 @@ export function AgentClient() {
           </button>
         </div>
         <div className="mt-2 grid grid-cols-2 gap-2">
-          <button onClick={() => fileRef.current?.click()} disabled={send.isPending} className="action-button-secondary disabled:opacity-40">
-            + Attach file
-          </button>
           <button onClick={() => cameraRef.current?.click()} disabled={send.isPending} className="action-button-secondary disabled:opacity-40">
-            Take a photo
+            Take photo
+          </button>
+          <button onClick={() => pdfRef.current?.click()} disabled={send.isPending} className="action-button-secondary disabled:opacity-40">
+            Upload PDF
+          </button>
+          <button onClick={() => fileRef.current?.click()} disabled={send.isPending} className="action-button-secondary col-span-2 disabled:opacity-40">
+            Attach image or audio
           </button>
         </div>
       </div>
@@ -140,102 +155,28 @@ export function AgentClient() {
 
 function Bubble({ message, slot, date }: { message: Message; slot: string | null; date: string }) {
   const mine = message.direction === 'inbound'
-  const draft = message.payload?.items as
-    | { name: string; estimated_mass_g: number; mass_range_g?: { low: number; high: number } }[]
-    | undefined
 
   return (
-    <div className={mine ? 'flex justify-end' : 'flex justify-start'}>
-      <div
-        className="max-w-[88%] rounded-2xl px-4 py-3 text-sm"
-        style={{
-          background: mine ? 'var(--color-accent)' : 'var(--color-surface)',
-          color: mine ? 'var(--color-bg)' : 'var(--color-tx)',
-          border: mine ? 'none' : '1px solid var(--color-line)',
-        }}
-      >
-        {message.status === 'failed' ? (
-          <span>{message.msg_text}</span>
-        ) : (
-          <span>{stripTags(message.msg_text ?? '')}</span>
-        )}
-
-        {message.status === 'needs_confirmation' && draft && (
-          <ConfirmCard messageId={message.id} items={draft} slot={slot} date={date} />
-        )}
-      </div>
-    </div>
-  )
-}
-
-/**
- * The confirm step. Ranges, not point values - the published evidence says
- * photo estimates run ~33% low, driven almost entirely by invisible fat, so a
- * single number would be a confident lie.
- */
-function ConfirmCard({ messageId, items, slot, date }: {
-  messageId: string
-  items: { name: string; estimated_mass_g: number; mass_range_g?: { low: number; high: number } }[]
-  slot: string | null
-  date: string
-}) {
-  const qc = useQueryClient()
-  const [edited, setEdited] = useState(items)
-  const [mealSlot, setMealSlot] = useState(slot ?? suggestedSlot())
-
-  const confirm = useMutation({
-    mutationFn: () =>
-      api.confirmMessage(messageId, {
-        meal_date: date,
-        meal_type: mealSlot,
-        items: edited.map((i) => ({
-          dish_name: i.name, grams: i.estimated_mass_g, portion_unit: 'g',
-        })),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['messages'] })
-      qc.invalidateQueries({ queryKey: ['day'] })
-    },
-  })
-
-  return (
-    <div className="mt-2 space-y-2 rounded-lg p-2" style={{ background: 'var(--color-bg)' }}>
-      <label className="block text-sm font-semibold">Add to
-        <select className="input mt-1" value={mealSlot} onChange={(event) => setMealSlot(event.target.value)}>
-          <option value="breakfast">Breakfast</option><option value="brunch">Brunch</option><option value="lunch">Lunch</option><option value="snacks">Snacks</option><option value="dinner">Dinner</option><option value="misc">Other</option>
-        </select>
-      </label>
-      {edited.map((item, i) => (
-        <div key={i} className="text-sm">
-          <div className="flex items-center justify-between gap-2">
-            <span style={{ color: 'var(--color-tx)' }}>{item.name}</span>
-            <input
-              type="number"
-              value={item.estimated_mass_g}
-              onChange={(e) => {
-                const next = [...edited]
-                next[i] = { ...item, estimated_mass_g: Number(e.target.value) }
-                setEdited(next)
-              }}
-              className="w-16 rounded border bg-transparent px-1 py-0.5 text-right tabular-nums"
-              style={{ borderColor: 'var(--color-line)', color: 'var(--color-tx)' }}
-            />
-          </div>
-          {item.mass_range_g && (
-            <p style={{ color: 'var(--color-tx2)' }}>
-              likely {item.mass_range_g.low}-{item.mass_range_g.high} g
-            </p>
+    <div className="space-y-3">
+      <div className={mine ? 'flex justify-end' : 'flex justify-start'}>
+        <div
+          className="max-w-[88%] rounded-2xl px-4 py-3 text-sm"
+          style={{
+            background: mine ? 'var(--color-accent)' : 'var(--color-surface)',
+            color: mine ? 'var(--color-bg)' : 'var(--color-tx)',
+            border: mine ? 'none' : '1px solid var(--color-line)',
+          }}
+        >
+          {message.status === 'failed' ? (
+            <span>{message.msg_text}</span>
+          ) : (
+            <span>{stripTags(message.msg_text ?? '')}</span>
           )}
         </div>
-      ))}
-      <button
-        onClick={() => confirm.mutate()}
-        disabled={confirm.isPending}
-        className="btn-primary mt-2 w-full"
-      >
-        {confirm.isPending ? 'Logging…' : 'Log it'}
-      </button>
-      {confirm.error && <p style={{ color: 'var(--color-danger)' }}>{confirm.error.message}</p>}
+      </div>
+      {message.status === 'needs_confirmation' && (
+        <MealDraftReview messageId={message.id} payload={message.payload} initialSlot={slot} initialDate={date} />
+      )}
     </div>
   )
 }
@@ -247,12 +188,4 @@ function stripTags(text: string): string {
     .replace(/\[auto-video-caption\]:\s*/g, '')
     .replace(/User sent an image, description above/g, '')
     .trim()
-}
-
-function suggestedSlot() {
-  const hour = new Date().getHours()
-  if (hour < 11) return 'breakfast'
-  if (hour < 15) return 'lunch'
-  if (hour < 18) return 'snacks'
-  return 'dinner'
 }

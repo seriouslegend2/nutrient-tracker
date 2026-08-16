@@ -17,7 +17,7 @@ from app.core.exceptions import (
     ValidationError,
     VLCDRefusedError,
 )
-from app.domain.goals.progress import evaluate_goal_progress
+from app.domain.goals.progress import evaluate_goal_progress, evaluate_metric_progress
 from app.services.supabase import call_rpc, get_supabase
 from app.utils.logger import logger
 
@@ -448,7 +448,9 @@ async def progress_summary(user_id: str, as_of: date) -> dict[str, Any]:
     metrics: list[dict[str, Any]] = []
 
     if range_start <= range_end:
-        needs_meals = any(goal["kind"] in {"nutrient", "item", "behaviour"} for goal in goals)
+        needs_meals = any(
+            goal["kind"] in {"nutrient", "body_weight", "item", "behaviour"} for goal in goals
+        )
         if needs_meals:
             meals_result = (
                 await sb.table("meals")
@@ -508,6 +510,43 @@ async def progress_summary(user_id: str, as_of: date) -> dict[str, Any]:
         kind = goal["kind"]
         target_rows = (goal.get("daily_targets") or {}).get("targets") or []
         target = target_rows[0] if target_rows else {}
+        metric_summaries: list[dict[str, Any]] = []
+
+        for target_row in target_rows:
+            if kind == "body_weight" and target_row.get("metric") == "water_ml":
+                continue
+            metric_actuals: dict[date, float | None] = {}
+            metric = target_row.get("metric")
+            scope = target_row.get("scope") or "total"
+            if metric == "water_ml":
+                for row in water:
+                    logged_on = _as_date(row["logged_on"])
+                    metric_actuals[logged_on] = (metric_actuals.get(logged_on) or 0) + float(
+                        row["volume_ml"]
+                    )
+            elif scope == "activity":
+                metric_actuals = {_as_date(row["activity_date"]): 1.0 for row in activities}
+            elif scope == "dish":
+                food_id = str(target_row.get("food_id") or "")
+                for row in meals:
+                    if str(row.get("food_id") or "") == food_id and row.get("grams") is not None:
+                        logged_on = _as_date(row["meal_date"])
+                        metric_actuals[logged_on] = (metric_actuals.get(logged_on) or 0) + float(
+                            row["grams"]
+                        )
+            elif scope == "count":
+                metric_actuals = {_as_date(row["meal_date"]): 1.0 for row in meals}
+            else:
+                for row in meals:
+                    value = (row.get("nutrients") or {}).get(metric)
+                    if value is not None:
+                        logged_on = _as_date(row["meal_date"])
+                        metric_actuals[logged_on] = (metric_actuals.get(logged_on) or 0) + float(
+                            value
+                        )
+            metric_summaries.append(
+                evaluate_metric_progress(goal, target_row, metric_actuals, as_of)
+            )
 
         if kind == "nutrient":
             metric = target.get("metric")
@@ -548,6 +587,8 @@ async def progress_summary(user_id: str, as_of: date) -> dict[str, Any]:
                 actuals[cursor] = latest
                 cursor += timedelta(days=1)
 
-        summaries.append(evaluate_goal_progress(goal, actuals, as_of))
+        summary = evaluate_goal_progress(goal, actuals, as_of)
+        summary["metrics"] = metric_summaries
+        summaries.append(summary)
 
     return {"as_of": as_of.isoformat(), "goals": summaries}

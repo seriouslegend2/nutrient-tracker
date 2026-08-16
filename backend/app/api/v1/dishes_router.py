@@ -46,6 +46,7 @@ class CategoryPortionResponse(BaseModel):
     portion_unit: str
     portion_grams: float
     portion_count: float
+    effective_portion_grams: float
     is_custom: bool
     global_portion_grams: float
     global_portion_count: float

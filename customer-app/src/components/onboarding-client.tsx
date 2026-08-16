@@ -34,13 +34,13 @@ const ACTIVITY = [
 ]
 
 const PORTION_QUESTIONS = [
-  { key: 'dal_gravy', label: 'Dal or curry', unit: 'katori', options: [0.5, 1, 1.5, 2] },
-  { key: 'rice_grain', label: 'Rice', unit: 'bowl', options: [0.5, 1, 1.5, 2] },
-  { key: 'flatbread', label: 'Roti / paratha', unit: 'pieces', options: [1, 2, 3, 4] },
-  { key: 'dry_sabzi', label: 'Sabzi', unit: 'katori', options: [0.5, 1, 1.5] },
-  { key: 'protein_main', label: 'Chicken / fish', unit: 'g', options: [100, 150, 200, 250] },
-  { key: 'curd_raita', label: 'Curd', unit: 'katori', options: [0.5, 1, 1.5] },
-  { key: 'beverage_milk', label: 'Milk / tea', unit: 'glass', options: [1, 1.5, 2] },
+  { key: 'dal_gravy', label: 'Dal or curry', unit: 'katori', grams: 200, options: [0.5, 1, 1.5, 2] },
+  { key: 'rice_grain', label: 'Rice', unit: 'bowl', grams: 150, options: [0.5, 1, 1.5, 2] },
+  { key: 'flatbread', label: 'Roti / paratha', unit: 'piece', grams: 45, options: [1, 2, 3, 4] },
+  { key: 'dry_sabzi', label: 'Sabzi', unit: 'katori', grams: 150, options: [0.5, 1, 1.5] },
+  { key: 'protein_main', label: 'Chicken / fish', unit: 'serving', grams: 150, options: [0.5, 1, 1.5, 2] },
+  { key: 'curd_raita', label: 'Curd', unit: 'katori', grams: 150, options: [0.5, 1, 1.5] },
+  { key: 'beverage_milk', label: 'Milk / tea', unit: 'glass', grams: 200, options: [0.5, 1, 1.5, 2] },
 ]
 
 export function OnboardingClient() {
@@ -165,16 +165,17 @@ export function OnboardingClient() {
       )}
 
       {step === 3 && (
-        <Screen title="Your portions" why="Optional defaults make manual logging faster. You can edit all of them later.">
+        <Screen title="Your usual portions" why="The grams for one category unit are fixed. Choose only how many units you normally take in one meal. You can still log more or fewer servings for a specific meal later.">
           {PORTION_QUESTIONS.map((question) => (
             <Field key={question.key} label={question.label}>
+              <p className="mb-2 text-xs" style={{ color: 'var(--color-tx2)' }}>Fixed: 1 {question.unit} = {question.grams} g. Choose your usual count.</p>
               <div className="flex flex-wrap gap-2">
                 {question.options.map((option) => (
                   <button key={option} type="button"
                           onClick={() => set('portions', { ...a.portions, [question.key]: { count: option } })}
                           className="choice"
                           data-selected={a.portions[question.key]?.count === option}>
-                    {option} {question.unit}
+                    {option} {question.unit}{option === 1 || question.unit === 'katori' ? '' : 's'}
                   </button>
                 ))}
               </div>

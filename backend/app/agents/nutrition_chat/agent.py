@@ -19,14 +19,16 @@ from app.agents.nutrition_chat.middleware import (
 from app.agents.nutrition_chat.models import ChatTurn
 from app.agents.nutrition_chat.prompt import NUTRITION_CHAT_PROMPT
 from app.agents.nutrition_chat.state import NutritionChatState
-from app.agents.nutrition_chat.tools import read_tools
-from app.agents.nutrition_chat.tools import tools as domain_tools
+from app.agents.nutrition_chat.tools import confirmation_required_tools, mutation_tools, read_tools
 from app.agents.runtime_context import NutrientTrackerRuntimeContext
 from app.utils.logger import logger
 
 
 async def build_nutrition_chat_agent(
-    config: RunnableConfig | None = None, *, allow_mutations: bool = True
+    config: RunnableConfig | None = None,
+    *,
+    allow_mutations: bool = True,
+    allow_nutrition_entry: bool = False,
 ):
     """Build the agent. Called once per invocation by the agent registry."""
     middleware = [
@@ -37,9 +39,15 @@ async def build_nutrition_chat_agent(
         UserContextMiddleware(),
     ]
 
+    available_tools = read_tools
+    if allow_mutations:
+        available_tools = [*read_tools, *mutation_tools]
+        if allow_nutrition_entry:
+            available_tools.extend(confirmation_required_tools)
+
     agent = create_agent(
         model=resolve_model(),
-        tools=domain_tools if allow_mutations else read_tools,
+        tools=available_tools,
         name="nutrition_chat",
         state_schema=NutritionChatState,
         context_schema=NutrientTrackerRuntimeContext,

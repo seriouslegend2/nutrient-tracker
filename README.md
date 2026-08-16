@@ -82,7 +82,7 @@ backend/app/
   services/               Supabase client, media provider I/O, identity
 customer-app/             Next.js customer UI and same-origin BFF routes
 internal-dashboard/       Next.js admin UI and same-origin BFF routes
-supabase/migrations/      15 ordered SQL migrations
+supabase/migrations/      16 ordered SQL migrations
 seeds/seed_dishes.py      optional 61-dish curated starter seed
 ```
 
@@ -279,9 +279,9 @@ docker run --rm -d --name nt-verify \
 docker stop nt-verify
 ```
 
-On 2026-08-16, that complete suite applied all 15 migrations to an empty
-Supabase-shaped Postgres 17 database and reported `98 passed`. The customer
-test suite reported `31 passed`, the dashboard suite reported `22 passed`, and
+On 2026-08-16, that complete suite applied all 16 migrations to an empty
+Supabase-shaped Postgres 17 database and reported `124 passed`. The customer
+test suite reported `46 passed`, the dashboard suite reported `23 passed`, and
 `npm audit --omit=dev` reported zero production vulnerabilities in each
 frontend. See `STATUS.html` for the other commands run and the exact boundary of
 that evidence.
@@ -303,9 +303,10 @@ that evidence.
   it is not automatic image classification.
 - The customer app has a web manifest but no service worker/offline mode. It has
   no account export or self-service account deletion.
-- Household category serving sizes are edited under **You → Your portions**.
-  Meal creation and correction only choose a serving count; customers cannot
-  redefine grams or create per-dish portion overrides from a meal.
+- Fixed category units and grams are shown under **You → Your portions**.
+  Customers can edit only how many fixed units make their usual serving. Meal
+  creation and correction choose a serving count; customers cannot redefine
+  category grams or create per-dish portion overrides.
 - The dashboard intentionally has no user search/filter/sort, food-database
   editor, body-history/audit panels, or account mutation tools.
 - Frontend types are maintained locally; no generated OpenAPI client/type

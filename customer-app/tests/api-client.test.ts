@@ -59,6 +59,39 @@ describe('customer API client', () => {
     })
   })
 
+  it('confirms a typed media meal draft and returns created meals', async () => {
+    const response = { created: 1, meals: [{ id: 'meal-1', dish_name: 'dal' }] }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(response))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await api.confirmMessage('message-1', {
+      meal_date: '2026-08-16',
+      meal_type: 'lunch',
+      items: [{ dish_name: 'dal', grams: null, portions: 1.5, portion_unit: 'katori' }],
+    })
+
+    expect(result).toEqual(response)
+    expect(fetchMock).toHaveBeenCalledWith('/api/messages/message-1/confirm', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        meal_date: '2026-08-16',
+        meal_type: 'lunch',
+        items: [{ dish_name: 'dal', grams: null, portions: 1.5, portion_unit: 'katori' }],
+      }),
+    }))
+  })
+
+  it('permanently discards a media meal draft', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.discardMessage('message-1')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/messages/message-1/discard', expect.objectContaining({
+      method: 'POST',
+    }))
+  })
+
   it('returns undefined for a successful no-content response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
 
@@ -95,5 +128,33 @@ describe('customer API client', () => {
       body: JSON.stringify({ date: '2026-08-16', activity_type: 'training' }),
     }))
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/goals/goal-1/primary', expect.objectContaining({ method: 'POST' }))
+  })
+
+  it('updates only the usual category serving count', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ portion_count: 1.5 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.setPortion('dal_gravy', 1.5)
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/me/portions/dal_gravy', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ portion_count: 1.5 }),
+    }))
+  })
+
+  it('uses report BFF routes and repeats requested nutrients', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ series: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.mealPatterns({ date_from: '2026-08-01', date_to: '2026-08-16' })
+    await api.nutrientSeries({
+      date_from: '2026-08-01', date_to: '2026-08-16', group_by: 'day',
+      nutrient: ['fiber_g', 'sodium_mg'],
+    })
+    await api.hydrationReport({ date_from: '2026-08-01', date_to: '2026-08-16', group_by: 'week' })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/reports/meal-patterns?date_from=2026-08-01&date_to=2026-08-16', expect.any(Object))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/reports/nutrient-series?date_from=2026-08-01&date_to=2026-08-16&group_by=day&nutrient=fiber_g&nutrient=sodium_mg', expect.any(Object))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/reports/hydration?date_from=2026-08-01&date_to=2026-08-16&group_by=week', expect.any(Object))
   })
 })

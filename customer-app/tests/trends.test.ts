@@ -5,7 +5,8 @@ import { aggregateDatedValues, average, expectedBuckets, periodChange, reportWin
 describe('trend utilities', () => {
   it('builds inclusive local report windows', () => {
     expect(reportWindow('7d', new Date(2026, 7, 16))).toMatchObject({
-      dateFrom: '2026-08-10', dateTo: '2026-08-16', grouping: 'day',
+      dateFrom: '2026-08-10', dateTo: '2026-08-16',
+      previousDateFrom: '2026-08-03', previousDateTo: '2026-08-09', grouping: 'day',
     })
   })
 

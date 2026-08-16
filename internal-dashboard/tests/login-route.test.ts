@@ -1,82 +1,102 @@
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { POST } from '../app/api/auth/login/route'
+import { GET as callback } from '../app/auth/callback/route'
+import { GET as google } from '../app/api/auth/google/route'
 import { createClient } from '../src/lib/supabase/server'
 
 vi.mock('../src/lib/supabase/server', () => ({
   createClient: vi.fn(),
 }))
 
-const signInWithPassword = vi.fn()
+const signInWithOAuth = vi.fn()
+const exchangeCodeForSession = vi.fn()
 const mockedCreateClient = vi.mocked(createClient)
 
-function loginRequest(values: Record<string, string>) {
-  return new NextRequest('https://dashboard.example/api/auth/login', {
-    method: 'POST',
-    body: new URLSearchParams(values),
-  })
-}
-
-describe('password login route', () => {
+describe('Google OAuth routes', () => {
   beforeEach(() => {
-    signInWithPassword.mockReset()
+    signInWithOAuth.mockReset()
+    exchangeCodeForSession.mockReset()
     mockedCreateClient.mockReset()
     mockedCreateClient.mockResolvedValue({
-      auth: { signInWithPassword },
+      auth: { signInWithOAuth, exchangeCodeForSession },
     } as unknown as Awaited<ReturnType<typeof createClient>>)
   })
 
-  it('signs in server-side and redirects to a safe destination', async () => {
-    signInWithPassword.mockResolvedValue({ error: null })
-
-    const response = await POST(loginRequest({
-      email: ' admin@example.com ',
-      password: 'correct horse battery staple',
-      next: '/users?page=2',
-    }))
-
-    expect(signInWithPassword).toHaveBeenCalledWith({
-      email: 'admin@example.com',
-      password: 'correct horse battery staple',
+  it('opens the account chooser with a safe dashboard callback', async () => {
+    signInWithOAuth.mockResolvedValue({
+      data: { url: 'https://accounts.google.com/o/oauth2/v2/auth' },
+      error: null,
     })
-    expect(response.status).toBe(303)
-    expect(response.headers.get('location')).toBe('https://dashboard.example/users?page=2')
-  })
 
-  it('uses the default destination when next is unsafe', async () => {
-    signInWithPassword.mockResolvedValue({ error: null })
+    const response = await google(new NextRequest(
+      'https://dashboard.example/api/auth/google?next=%2Fusers%3Fpage%3D2'
+    ))
 
-    const response = await POST(loginRequest({
-      email: 'admin@example.com',
-      password: 'secret',
-      next: '//attacker.example/steal',
-    }))
-
-    expect(response.headers.get('location')).toBe('https://dashboard.example/users')
-  })
-
-  it('returns a clear login error without exposing provider details', async () => {
-    signInWithPassword.mockResolvedValue({ error: new Error('provider detail') })
-
-    const response = await POST(loginRequest({
-      email: 'admin@example.com',
-      password: 'wrong',
-      next: '/users',
-    }))
-
-    expect(response.status).toBe(303)
+    expect(signInWithOAuth).toHaveBeenCalledWith({
+      provider: 'google',
+      options: {
+        redirectTo: 'https://dashboard.example/auth/callback?next=%2Fusers%3Fpage%3D2',
+        queryParams: { prompt: 'select_account' },
+      },
+    })
     expect(response.headers.get('location')).toBe(
-      'https://dashboard.example/auth/login?error=invalid_credentials&next=%2Fusers'
+      'https://accounts.google.com/o/oauth2/v2/auth'
     )
   })
 
-  it('rejects missing credentials before creating a Supabase client', async () => {
-    const response = await POST(loginRequest({ email: '', password: '', next: '/users' }))
+  it('does not include an unsafe continuation in the callback', async () => {
+    signInWithOAuth.mockResolvedValue({
+      data: { url: 'https://accounts.google.com/o/oauth2/v2/auth' },
+      error: null,
+    })
 
-    expect(mockedCreateClient).not.toHaveBeenCalled()
+    await google(new NextRequest(
+      'https://dashboard.example/api/auth/google?next=%2F%2Fattacker.example'
+    ))
+
+    expect(signInWithOAuth).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({
+        redirectTo: 'https://dashboard.example/auth/callback?next=%2Fusers',
+      }),
+    }))
+  })
+
+  it('returns to login when Google authorization cannot start', async () => {
+    signInWithOAuth.mockResolvedValue({
+      data: { url: null },
+      error: new Error('provider unavailable'),
+    })
+
+    const response = await google(new NextRequest(
+      'https://dashboard.example/api/auth/google?next=%2Fusers'
+    ))
+
     expect(response.headers.get('location')).toBe(
-      'https://dashboard.example/auth/login?error=missing_credentials&next=%2Fusers'
+      'https://dashboard.example/auth/login?error=google_auth_failed&next=%2Fusers'
+    )
+  })
+
+  it('exchanges the callback code and redirects to a safe destination', async () => {
+    exchangeCodeForSession.mockResolvedValue({ error: null })
+
+    const response = await callback(new NextRequest(
+      'https://dashboard.example/auth/callback?code=google-code&next=%2Fusers%3Fpage%3D3'
+    ))
+
+    expect(exchangeCodeForSession).toHaveBeenCalledWith('google-code')
+    expect(response.headers.get('location')).toBe('https://dashboard.example/users?page=3')
+  })
+
+  it('returns to login when the callback exchange fails', async () => {
+    exchangeCodeForSession.mockResolvedValue({ error: new Error('invalid code') })
+
+    const response = await callback(new NextRequest(
+      'https://dashboard.example/auth/callback?code=bad-code&next=%2Fusers'
+    ))
+
+    expect(response.headers.get('location')).toBe(
+      'https://dashboard.example/auth/login?error=google_auth_failed&next=%2Fusers'
     )
   })
 })

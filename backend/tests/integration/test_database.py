@@ -584,10 +584,10 @@ def test_preference_and_portion_swaps_are_versioned_atomically() -> None:
         == "2,1,2"
     )
 
-    for grams in (180, 190):
+    for count in (1, 1.5):
         psql(
-            f"SELECT count(*) FROM fn_set_category_household("
-            f"'{USER_ID}', 'dal_gravy', 'katori', {grams}, 1, 'manual');"
+            f"SELECT count(*) FROM fn_set_category_household_count("
+            f"'{USER_ID}', 'dal_gravy', {count}, 'manual');"
         )
     assert (
         psql(
@@ -595,6 +595,13 @@ def test_preference_and_portion_swaps_are_versioned_atomically() -> None:
             f"FROM category_household WHERE user_id='{USER_ID}' AND category='dal_gravy';"
         )
         == "2,1,2"
+    )
+    assert (
+        psql(
+            f"SELECT portion_grams || ',' || portion_count FROM category_household "
+            f"WHERE user_id='{USER_ID}' AND category='dal_gravy' AND is_active;"
+        )
+        == "200,1.5"
     )
 
 

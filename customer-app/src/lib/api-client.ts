@@ -94,8 +94,8 @@ export const api = {
     request<Page<BodyMetric>>(`/me/body-metrics${qs(params)}`),
 
   portions: () => request<Page<CategoryPortion>>('/me/portions'),
-  setPortion: (category: string, body: Record<string, unknown>) =>
-    request(`/me/portions/${category}`, { method: 'PUT', body: JSON.stringify(body) }),
+  setPortion: (category: string, portion_count: number) =>
+    request(`/me/portions/${category}`, { method: 'PUT', body: JSON.stringify({ portion_count }) }),
 
   preferences: () => request<Page<Preference>>('/me/preferences'),
   setPreference: (topic: string, body: Record<string, unknown>) =>
@@ -118,8 +118,6 @@ export const api = {
   searchDishes: (q: string, page = 1) =>
     request<Page<Dish>>(`/dishes/search${qs({ q, page })}`),
   dishPortion: (id: string) => request<DishPortion>(`/dishes/${id}/portion`),
-  setDishPortion: (id: string, body: Record<string, unknown>) =>
-    request(`/me/dishes/${id}/portion`, { method: 'PUT', body: JSON.stringify(body) }),
   categories: () => request<Page<CategoryPortion>>('/categories'),
 
   activeGoal: () => request<Goal | null>('/goals/active'),
@@ -147,6 +145,12 @@ export const api = {
   micros: (params: Record<string, unknown> = {}) => request<Micros>(`/reports/micros${qs(params)}`),
   goalVsActual: (params: Record<string, unknown> = {}) =>
     request<GoalVsActual>(`/reports/goal-vs-actual${qs(params)}`),
+  mealPatterns: (params: Record<string, unknown> = {}) =>
+    request<MealPatterns>(`/reports/meal-patterns${qs(params)}`),
+  nutrientSeries: (params: Record<string, unknown> = {}) =>
+    request<NutrientSeries>(`/reports/nutrient-series${qs(params)}`),
+  hydrationReport: (params: Record<string, unknown> = {}) =>
+    request<HydrationReport>(`/reports/hydration${qs(params)}`),
 
   logWater: (volume_ml: number, logged_on?: string) =>
     request('/water', { method: 'POST', body: JSON.stringify({ volume_ml, logged_on }) }),
@@ -156,8 +160,12 @@ export const api = {
     request<Message[]>('/messages', { method: 'POST', body: form }),
   messages: (params: Record<string, unknown> = {}) =>
     request<Page<Message>>(`/messages${qs(params)}`),
-  confirmMessage: (id: string, body: Record<string, unknown>) =>
-    request(`/messages/${id}/confirm`, { method: 'POST', body: JSON.stringify(body) }),
+  confirmMessage: (id: string, body: MealDraftConfirmRequest) =>
+    request<MealDraftConfirmResponse>(`/messages/${id}/confirm`, {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  discardMessage: (id: string) =>
+    request<void>(`/messages/${id}/discard`, { method: 'POST' }),
 }
 
 // --- types (mirrors the backend response models) ---------------------------
@@ -194,6 +202,7 @@ export type CategoryPortion = {
   portion_unit: string
   portion_grams: number
   portion_count: number
+  effective_portion_grams: number
   is_custom: boolean
   global_portion_grams: number
   global_portion_count: number
@@ -301,6 +310,26 @@ export type GoalProgressValue = {
   target: number
   unit: string
   direction: GoalDirection | null
+  progress_pct: number | null
+}
+
+export type GoalProgressWindow = GoalProgressValue & {
+  starts_on: string
+  ends_on: string
+  target_to_date: number
+}
+
+export type GoalMetricProgress = {
+  metric: string
+  label: string
+  unit: string
+  direction: GoalDirection
+  today: GoalProgressValue
+  period: GoalProgressValue & {
+    target_to_date: number
+    days_elapsed: number
+    total_days: number
+  }
 }
 
 export type GoalProgressSummaryItem = {
@@ -313,12 +342,19 @@ export type GoalProgressSummaryItem = {
   starts_on: string
   ends_on: string
   today: GoalProgressValue
+  current_week: GoalProgressWindow
+  metrics: GoalMetricProgress[]
   period: {
     status: GoalProgressStatus
     actual: number | null
     target: number
+    target_to_date: number
     unit: string
     progress_pct: number | null
+    overall_progress_pct: number | null
+    baseline: number | null
+    days_elapsed: number
+    total_days: number
     completed_buckets: number | null
     total_buckets: number | null
   }
@@ -405,7 +441,135 @@ export type GoalVsActual = {
   summary?: GoalProgress
 }
 
+export type MealPatterns = {
+  days: number
+  logged_days: number
+  item_count: number
+  timed_occurrences: number
+  slots: {
+    meal_type: string
+    days_present: number
+    item_count: number
+    timed_occurrences: number
+    median_slot_time: string | null
+    calories_kcal: number
+    energy_share_pct: number
+    unknown_energy_items: number
+  }[]
+  hourly: { hour: number; occurrences: number }[]
+  capture_sources: SourceBreakdown[]
+  portion_sources: SourceBreakdown[]
+  nutrient_coverage: {
+    nutrient: string
+    items_with_value: number
+    total_items: number
+    coverage_pct: number
+  }[]
+}
+
+export type SourceBreakdown = { source: string; item_count: number; share_pct: number }
+
+export type NutrientSeries = {
+  group_by: string
+  nutrients: string[]
+  logged_days: number
+  unaccounted_items: number
+  series: {
+    bucket: string
+    totals: Record<string, number>
+    daily_averages: Record<string, number>
+    coverage_items: Record<string, number>
+    coverage_days: Record<string, number>
+  }[]
+}
+
+export type HydrationReport = {
+  group_by: string
+  logged_days: number
+  series: {
+    bucket: string
+    volume_ml: number
+    log_count: number
+    logged_days: number
+    daily_average_ml: number
+  }[]
+}
+
 export type WaterLog = { logged_on: string; volume_ml: number }
+
+export type MealDraftConfidence = 'low' | 'medium' | 'high' | string
+
+export type MediaMealDraftItem = {
+  name: string
+  name_normalized?: string
+  estimated_mass_g?: number | null
+  mass_range_g?: { low: number; high: number }
+  confidence?: MealDraftConfidence | {
+    identity?: MealDraftConfidence
+    mass?: MealDraftConfidence
+    sample_cv?: number
+  }
+  quantity?: number | null
+  unit?: string | null
+  portions?: number | null
+  portion_count?: number | null
+  portion_unit?: string | null
+  count?: number | null
+  unit_mass_g?: number | null
+  container?: string | null
+  food_id?: string | null
+  resolved_name?: string | null
+  category?: string | null
+  total_grams?: number | null
+  amount_source?: string | null
+  matching_confidence?: MealDraftConfidence | 'none' | null
+  portion_metadata?: {
+    portion_unit?: string | null
+    portion_grams?: number | null
+    portion_count?: number | null
+    effective_portion_grams?: number | null
+    is_custom?: boolean
+    resolved_portion_unit?: string | null
+    resolved_portion_grams?: number | null
+    resolved_from?: string | null
+  }
+  nutrients?: Record<string, number>
+  meal_date?: string | null
+  meal_type?: string | null
+  source_metadata?: Record<string, unknown>
+}
+
+export type MediaMealDraftPayload = {
+  items: MediaMealDraftItem[]
+  source_metadata?: {
+    kind?: 'food_photo' | 'food_diary_pdf' | 'nutrition_label' | string
+    mime_type?: string
+    filename?: string | null
+    [key: string]: unknown
+  }
+  confidence?: MealDraftConfidence
+  [key: string]: unknown
+}
+
+export type MealDraftConfirmItem = {
+  dish_name: string
+  grams: number | null
+  portions: number
+  portion_unit: string
+  food_id?: string
+  confidence?: string
+}
+
+export type MealDraftConfirmRequest = {
+  meal_date: string
+  meal_type: string
+  items: MealDraftConfirmItem[]
+}
+
+export type MealDraftConfirmResponse = {
+  created: number
+  meals: Meal[]
+}
 
 export type Message = {
   id: string

@@ -52,7 +52,7 @@ export function AboutClient() {
 
     <section className="card mb-4 p-5">
       <h2 className="display-title text-2xl">Your portions</h2>
-      <p className="mb-3 mt-0.5 text-xs" style={{ color: 'var(--color-tx2)' }}>Edit the size of one portion for each category.</p>
+      <p className="mb-3 mt-0.5 text-xs" style={{ color: 'var(--color-tx2)' }}>Each category has a fixed unit and grams. You can change only how many units make your usual serving. A specific meal can still use more or fewer servings.</p>
       {(portions.data?.items ?? []).map((portion) => <PortionEditor key={portion.category} portion={portion}
         onSaved={() => queryClient.invalidateQueries({ queryKey: ['portions'] })} />)}
     </section>
@@ -67,7 +67,7 @@ export function AboutClient() {
     <section id="goals" className="card mb-4 scroll-mt-4 p-5">
       <div className="flex items-center justify-between"><h2 className="display-title text-2xl">Goals</h2>
         <a href="/goals/new" className="action-button">+ Add a goal</a></div>
-      <p className="mb-2 mt-1 text-xs" style={{ color: 'var(--color-tx2)' }}>You can keep several goals active together. Primary controls the calorie plan at the top of Today; explicit protein and hydration goals supply their own daily targets.</p>
+      <p className="mb-2 mt-1 text-xs" style={{ color: 'var(--color-tx2)' }}>You can keep several goals active together. Today shows each goal’s daily and full-period progress from your logged meals, water, or training check-ins.</p>
       {(goals.data?.items ?? []).map((goal) => <div key={`${goal.goal_id}-${goal.version}`} className="border-t py-4 text-sm" style={{ borderColor: 'var(--color-line)' }}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <span><strong className="block">{managedGoalLabel(goal.kind, goal.spec)}</strong><span className="mt-1 block text-xs capitalize" style={{ color: 'var(--color-tx2)' }}>{goal.cadence} cadence | {goal.starts_on} to {goal.ends_on}</span></span>
@@ -127,13 +127,12 @@ function ProfileEditor({ profile, onSaved }: { profile: Profile; onSaved: () => 
 
 function PortionEditor({ portion, onSaved }: { portion: CategoryPortion; onSaved: () => void }) {
   const [editing, setEditing] = useState(false)
-  const [grams, setGrams] = useState(String(portion.portion_grams))
   const [count, setCount] = useState(String(portion.portion_count))
-  const save = useMutation({ mutationFn: () => api.setPortion(portion.category, { portion_unit: portion.portion_unit, portion_grams: Number(grams), portion_count: Number(count) }), onSuccess: () => { setEditing(false); onSaved() } })
+  const save = useMutation({ mutationFn: () => api.setPortion(portion.category, Number(count)), onSuccess: () => { setEditing(false); onSaved() } })
   return <div className="border-t py-2 text-sm first:border-t-0" style={{ borderColor: 'var(--color-line)' }}>
-    <button onClick={() => setEditing(!editing)} aria-expanded={editing} className="grid w-full grid-cols-[1fr_auto] items-center gap-3 text-left"><span><span className="block font-medium">{CATEGORY_LABEL[portion.category] ?? portion.category}</span><span className="mt-0.5 block tabular-nums" style={{ color: 'var(--color-tx2)' }}>1 serving = {portion.portion_count} {portion.portion_unit} ({portion.portion_grams} g){portion.is_custom && <span style={{ color: 'var(--color-accent-strong)' }}> · Your size</span>}</span></span><span className="edit-badge">Edit</span></button>
-    {editing && <div className="mt-2 grid grid-cols-2 gap-2"><label className="text-xs">Serving count<input className="input mt-1" type="number" min="0.1" step="0.1" value={count} onChange={(e) => setCount(e.target.value)} /></label><label className="text-xs">Grams per serving<input className="input mt-1" type="number" min="1" value={grams} onChange={(e) => setGrams(e.target.value)} /></label>
-      <button className="action-button" disabled={!count || !grams || save.isPending} onClick={() => save.mutate()}>Save</button>{save.error && <p style={{ color: 'var(--color-danger)' }}>{save.error.message}</p>}</div>}
+    <button onClick={() => setEditing(!editing)} aria-expanded={editing} className="grid w-full grid-cols-[1fr_auto] items-center gap-3 text-left"><span><span className="block font-medium">{CATEGORY_LABEL[portion.category] ?? portion.category}</span><span className="mt-0.5 block tabular-nums" style={{ color: 'var(--color-tx2)' }}>Fixed category unit: 1 {portion.portion_unit} = {portion.portion_grams} g</span><span className="mt-0.5 block tabular-nums" style={{ color: 'var(--color-tx2)' }}>Your usual amount: {portion.portion_count} {portion.portion_unit} = {portion.effective_portion_grams} g{portion.is_custom && <span style={{ color: 'var(--color-accent-strong)' }}> · Your count</span>}</span></span><span className="edit-badge">Edit count</span></button>
+    {editing && <div className="mt-2 grid gap-2"><p className="text-xs" style={{ color: 'var(--color-tx2)' }}>The grams for one {portion.portion_unit} are fixed. This changes only your usual count, not meals already logged.</p><label className="text-xs">Usual serving count ({portion.portion_unit})<input className="input mt-1" type="number" min="0.1" max="20" step="0.1" value={count} onChange={(e) => setCount(e.target.value)} /></label>
+      <button className="action-button" disabled={!count || Number(count) <= 0 || Number(count) > 20 || save.isPending} onClick={() => save.mutate()}>Save</button>{save.error && <p style={{ color: 'var(--color-danger)' }}>{save.error.message}</p>}</div>}
   </div>
 }
 

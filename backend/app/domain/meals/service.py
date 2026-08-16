@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import math
 from datetime import date
 from typing import Any
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.domain.dishes import repository as dish_repo
-from app.domain.dishes.resolve import resolve_item
+from app.domain.dishes.resolve import ATWATER, resolve_item
 from app.domain.meals import repository as repo
 from app.utils.logger import logger
 
@@ -16,7 +17,7 @@ async def _prepare_item(
     *,
     user_id: str,
     meal_type: str,
-    dish_name: str,
+    dish_name: str | None,
     food_id: str | None = None,
     portions: float = 1.0,
     grams: float | None = None,
@@ -27,6 +28,7 @@ async def _prepare_item(
     confidence: str | None = None,
     nutrients: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    dish_name = (dish_name or "").strip() or f"{meal_type.title()} item"
     category: str | None = None
 
     # If no dish was chosen, try to attach one by name - but never block on it.
@@ -42,9 +44,9 @@ async def _prepare_item(
     if nutrients is not None:
         # Caller supplied nutrition (photo estimate, label scan, user override).
         # Level ① - use it and do not re-resolve behind them.
-        resolution_unit = portion_unit or "g"
+        resolution_unit = portion_unit or "serving"
         row_grams = grams
-        row_nutrients = nutrients
+        row_nutrients = _normalise_supplied_nutrients(nutrients)
         resolved_from = "meals"
     else:
         res = await resolve_item(
@@ -78,12 +80,38 @@ async def _prepare_item(
     }
 
 
+def _normalise_supplied_nutrients(nutrients: dict[str, Any]) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for key, value in nutrients.items():
+        try:
+            number = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(
+                f"Nutrient {key} must be numeric.", code="INVALID_NUTRIENT_VALUE"
+            ) from exc
+        if not math.isfinite(number) or number < 0:
+            raise ValidationError(
+                f"Nutrient {key} must be finite and nonnegative.",
+                code="INVALID_NUTRIENT_VALUE",
+            )
+        out[key] = round(number, 2)
+    if not out:
+        raise ValidationError(
+            "At least one nutrient value is required.", code="EMPTY_NUTRIENT_ENTRY"
+        )
+    if "calories_kcal" not in out and any(metric in out for metric in ATWATER):
+        out["calories_kcal"] = round(
+            sum(out.get(metric, 0.0) * factor for metric, factor in ATWATER.items()), 0
+        )
+    return out
+
+
 async def add_item(
     *,
     user_id: str,
     meal_date: date,
     meal_type: str,
-    dish_name: str,
+    dish_name: str | None,
     food_id: str | None = None,
     portions: float = 1.0,
     grams: float | None = None,
@@ -153,6 +181,7 @@ async def replace_day(
             slot_time=item.get("slot_time"),
             source=item.get("source", "manual"),
             note=item.get("note"),
+            nutrients=item.get("nutrients"),
         )
         prepared.append(row)
 
@@ -183,6 +212,32 @@ async def adjust_item(
         raise NotFoundError("Meal item not found", code="MEAL_NOT_FOUND")
 
     effective_portions = portions if portions is not None else current["portions"]
+    if current.get("resolved_from") == "meals" and current.get("nutrients"):
+        current_portions = float(current.get("portions") or 1)
+        ratio = float(effective_portions) / current_portions
+        current_grams = current.get("grams")
+        if grams is not None and current_grams:
+            ratio = float(grams) / float(current_grams)
+        patch = {
+            "portions": effective_portions,
+            "portion_unit": portion_unit or current.get("portion_unit") or "serving",
+            "grams": (
+                grams
+                if grams is not None
+                else round(float(current_grams) * ratio, 2)
+                if current_grams is not None
+                else None
+            ),
+            "nutrients": {
+                key: round(float(value) * ratio, 2) for key, value in current["nutrients"].items()
+            },
+            "resolved_from": "meals",
+        }
+        updated = await repo.update_meal(user_id, meal_id, patch)
+        if not updated:
+            raise NotFoundError("Meal item not found", code="MEAL_NOT_FOUND")
+        return updated
+
     res = await resolve_item(
         user_id=user_id,
         dish_name=current["dish_name"],

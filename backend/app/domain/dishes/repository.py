@@ -109,20 +109,15 @@ async def set_dish_household(
 async def set_category_household(
     user_id: str,
     category: str,
-    portion_unit: str,
-    portion_grams: float,
     portion_count: float = 1.0,
     source: str = "questionnaire",
 ) -> dict[str, Any]:
-    """Level ③: THE table that matters. At most 18 rows per user, and it
-    answers every dish in that category forever."""
+    """Set the usual count; unit and grams always come from the fixed catalog."""
     rows = await call_rpc(
-        "fn_set_category_household",
+        "fn_set_category_household_count",
         {
             "p_user_id": user_id,
             "p_category": category,
-            "p_portion_unit": portion_unit,
-            "p_portion_grams": portion_grams,
             "p_portion_count": portion_count,
             "p_source": source,
         },
@@ -145,17 +140,18 @@ async def list_category_portions(user_id: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for g in globals_.data or []:
         override = by_cat.get(g["category"])
-        chosen = override or g
+        count = override["portion_count"] if override else g["portion_count"]
         out.append(
             {
                 "category": g["category"],
-                "portion_unit": chosen["portion_unit"],
-                "portion_grams": chosen["portion_grams"],
-                "portion_count": chosen["portion_count"],
+                "portion_unit": g["portion_unit"],
+                "portion_grams": g["portion_grams"],
+                "portion_count": count,
+                "effective_portion_grams": round(float(g["portion_grams"]) * float(count), 2),
                 "is_custom": override is not None,
                 "global_portion_grams": g["portion_grams"],
                 "global_portion_count": g["portion_count"],
-                "source": chosen.get("source"),
+                "source": (override or g).get("source"),
             }
         )
     return sorted(out, key=lambda r: r["category"])

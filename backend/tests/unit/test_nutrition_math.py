@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.domain.dishes import resolve
+from app.domain.dishes import repository, resolve
 from app.domain.dishes.resolve import scale_nutrients
 
 
@@ -63,3 +63,27 @@ async def test_exact_grams_preserve_the_dish_serving_unit(monkeypatch):
     assert result.portion_unit == "serving"
     assert result.grams == 180
     assert result.nutrients["protein_g"] == 18
+
+
+@pytest.mark.unit
+async def test_household_portion_write_sends_only_the_usual_count(monkeypatch):
+    call: dict = {}
+
+    async def fake_call_rpc(name, payload):
+        call.update(name=name, payload=payload)
+        return [{"portion_count": payload["p_portion_count"]}]
+
+    monkeypatch.setattr(repository, "call_rpc", fake_call_rpc)
+
+    result = await repository.set_category_household("user-1", "dal_gravy", 1.5)
+
+    assert result["portion_count"] == 1.5
+    assert call == {
+        "name": "fn_set_category_household_count",
+        "payload": {
+            "p_user_id": "user-1",
+            "p_category": "dal_gravy",
+            "p_portion_count": 1.5,
+            "p_source": "questionnaire",
+        },
+    }

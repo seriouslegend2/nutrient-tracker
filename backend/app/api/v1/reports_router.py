@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.deps import CurrentUser, get_current_user
 from app.domain.profile import repository as profile_repo
@@ -68,3 +68,43 @@ async def goal_vs_actual(
 ) -> dict[str, Any]:
     f, t = _window(date_from, date_to)
     return await service.goal_vs_actual(user.id, f, t)
+
+
+@router.get("/meal-patterns")
+async def meal_patterns(
+    user: CurrentUser = Depends(get_current_user),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+) -> dict[str, Any]:
+    f, t = _window(date_from, date_to)
+    return await service.meal_patterns(user.id, f, t)
+
+
+@router.get("/nutrient-series")
+async def nutrient_series(
+    user: CurrentUser = Depends(get_current_user),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    group_by: str = Query("day", pattern="^(day|week|month)$"),
+    nutrient: list[str] = Query(default=["fiber_g", "sodium_mg"]),
+) -> dict[str, Any]:
+    allowed = set(service.MACROS) | set(service.RDA)
+    invalid = sorted(set(nutrient) - allowed)
+    if invalid or not nutrient or len(nutrient) > 8:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Choose 1-8 supported nutrients; invalid: {', '.join(invalid) or 'none'}",
+        )
+    f, t = _window(date_from, date_to)
+    return await service.nutrient_series(user.id, f, t, list(dict.fromkeys(nutrient)), group_by)
+
+
+@router.get("/hydration")
+async def hydration(
+    user: CurrentUser = Depends(get_current_user),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    group_by: str = Query("day", pattern="^(day|week|month)$"),
+) -> dict[str, Any]:
+    f, t = _window(date_from, date_to)
+    return await service.hydration(user.id, f, t, group_by)
