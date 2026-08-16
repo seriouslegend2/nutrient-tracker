@@ -62,7 +62,9 @@ class ModelAndPromptMiddleware(AgentMiddleware):
 
 def resolve_model() -> BaseChatModel:
     """KookarCore-style provider-qualified model initialization."""
-    return init_chat_model(f"openai:{settings.CHAT_MODEL}")
+    return init_chat_model(
+        f"openai:{settings.CHAT_MODEL}", api_key=settings.OPENAI_API_KEY
+    )
 
 
 def _user_id(state: dict, runtime: Any) -> str | None:

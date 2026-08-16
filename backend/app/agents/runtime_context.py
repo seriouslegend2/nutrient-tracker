@@ -1,4 +1,4 @@
-"""Runtime context shared by the two LangGraph agents."""
+"""Runtime identity context shared by tool-enabled agents."""
 
 from __future__ import annotations
 

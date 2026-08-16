@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
-from langchain_core.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
+from langsmith.utils import LangSmithConflictError
 
+from app.agents.manual_meal_resolver.prompt import (
+    MANUAL_MEAL_RESOLVER_PROMPT,
+    MANUAL_MEAL_RESOLVER_PROMPT_NAME,
+    MANUAL_MEAL_RESOLVER_USER_PROMPT,
+)
+from app.agents.media_facts.prompt import (
+    MEDIA_FACTS_PROMPT,
+    MEDIA_FACTS_PROMPT_NAME,
+    MEDIA_FACTS_USER_PROMPT,
+)
+from app.agents.media_meal_resolver.prompt import (
+    MEDIA_MEAL_RESOLVER_PROMPT,
+    MEDIA_MEAL_RESOLVER_PROMPT_NAME,
+    MEDIA_MEAL_RESOLVER_USER_PROMPT,
+)
 from app.agents.nutrition_chat.prompt import NUTRITION_CHAT_PROMPT
 from app.config.settings import settings
-from app.services.media_extraction import (
-    FOOD_DIARY_PDF_PROMPT,
-    FOOD_DIARY_PDF_PROMPT_NAME,
-    FOOD_PHOTO_PROMPT,
-    FOOD_PHOTO_PROMPT_NAME,
-    NUTRITION_LABEL_PROMPT,
-    NUTRITION_LABEL_PROMPT_NAME,
-    VOICE_LOG_PROMPT,
-    VOICE_LOG_PROMPT_NAME,
-)
 from app.services.prompts import langsmith_client
 
 PROMPTS = {
@@ -23,23 +29,43 @@ PROMPTS = {
         NUTRITION_CHAT_PROMPT,
         "System instructions for the authenticated nutrition chat agent.",
     ),
-    FOOD_PHOTO_PROMPT_NAME: (
-        FOOD_PHOTO_PROMPT,
-        "Structured dish identity and quantity evidence from meal photographs.",
+    MEDIA_FACTS_PROMPT_NAME: (
+        MEDIA_FACTS_PROMPT,
+        "Factual evidence extraction for supported images and PDFs.",
     ),
-    NUTRITION_LABEL_PROMPT_NAME: (
-        NUTRITION_LABEL_PROMPT,
-        "Structured nutrition-panel extraction with column reconciliation.",
+    MEDIA_MEAL_RESOLVER_PROMPT_NAME: (
+        MEDIA_MEAL_RESOLVER_PROMPT,
+        "Draft-only media dish mapping and tool-driven catalog creation.",
     ),
-    VOICE_LOG_PROMPT_NAME: (
-        VOICE_LOG_PROMPT,
-        "Exact transcription guidance for spoken food logs.",
-    ),
-    FOOD_DIARY_PDF_PROMPT_NAME: (
-        FOOD_DIARY_PDF_PROMPT,
-        "Structured row extraction from food-diary PDFs.",
+    MANUAL_MEAL_RESOLVER_PROMPT_NAME: (
+        MANUAL_MEAL_RESOLVER_PROMPT,
+        "Manual dish matching and tool-driven catalog creation.",
     ),
 }
+
+
+def prompt_object(name: str, text: str) -> ChatPromptTemplate | PromptTemplate:
+    chat_user_templates = {
+        MANUAL_MEAL_RESOLVER_PROMPT_NAME: MANUAL_MEAL_RESOLVER_USER_PROMPT,
+        MEDIA_FACTS_PROMPT_NAME: MEDIA_FACTS_USER_PROMPT,
+        MEDIA_MEAL_RESOLVER_PROMPT_NAME: MEDIA_MEAL_RESOLVER_USER_PROMPT,
+    }
+    if name in chat_user_templates:
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", text),
+                ("user", chat_user_templates[name]),
+            ]
+        )
+        prompt.metadata = {"nutrient_tracker_chat_prompt": True}
+        return prompt
+
+    escaped = text.replace("{", "{{").replace("}", "}}")
+    return PromptTemplate.from_template(
+        escaped,
+        template_format="f-string",
+        metadata={"nutrient_tracker_literal_braces": True},
+    )
 
 
 def main() -> None:
@@ -56,23 +82,21 @@ def main() -> None:
     print(f"LangSmith project ready: {settings.LANGSMITH_PROJECT}")
 
     for name, (text, description) in PROMPTS.items():
-        # Escape every brace so JSON examples and runtime {context} tokens are
-        # data, not PromptTemplate variables. The runtime resolver reverses it.
-        escaped = text.replace("{", "{{").replace("}", "}}")
-        prompt = PromptTemplate.from_template(
-            escaped,
-            template_format="f-string",
-            metadata={"nutrient_tracker_literal_braces": True},
-        )
-        url = client.push_prompt(
-            name,
-            object=prompt,
-            is_public=False,
-            description=description,
-            tags=["nutrient-tracker", "agent-prompt"],
-            commit_description="Sync checked-in fallback prompt",
-        )
-        print(f"Published {name}: {url}")
+        prompt = prompt_object(name, text)
+        try:
+            url = client.push_prompt(
+                name,
+                object=prompt,
+                is_public=False,
+                description=description,
+                tags=["nutrient-tracker", "agent-prompt"],
+                commit_description="Sync checked-in fallback prompt",
+            )
+            print(f"Published {name}: {url}")
+        except LangSmithConflictError as exc:
+            if "Nothing to commit" not in str(exc):
+                raise
+            print(f"Unchanged {name}")
 
 
 if __name__ == "__main__":

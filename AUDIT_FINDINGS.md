@@ -169,10 +169,14 @@ deployment succeeded.
 - [ ] Verify direct authenticated-client own-row RLS behavior separately. The
   shipped BFF architecture intentionally performs product database calls with
   the backend service role.
-- [ ] Exercise live OpenAI calls for `nutrition_chat` and `media_extraction`
-  across image, label-hinted image, audio, and PDF inputs. Blocker: no provider
-  API credential was used; current evidence covers code paths with mocked
-  provider output only.
+- [x] Exercise live OpenAI and LangSmith calls for `media_facts` and the separate
+  draft-only `media_meal_resolver` with both a real meal image and a generated food-diary
+  PDF; an authenticated FastAPI acceptance run reviewed and confirmed all three
+  resulting meal rows, read them back from hosted Supabase, and removed the
+  temporary user afterward.
+- [ ] Exercise a live audio transcription followed by a live `nutrition_chat`
+  turn. The production route is wired and unit-covered, but this remaining path
+  still needs an audio fixture and authenticated acceptance run.
 - [x] Drive the baseline non-agent Playwright login/onboarding/goal/meal/water/
   report/profile/admin suite against hosted Supabase and all three configured
   services: 14 passed with screenshot and PDF evidence.

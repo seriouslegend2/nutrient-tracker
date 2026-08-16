@@ -1,12 +1,12 @@
-"""Strict contracts for manual dish matching and catalog creation."""
+"""Strict contracts for draft-only media dish resolution."""
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.domain.dishes.models import NutrientsPerUnit
+from app.agents.media_facts.models import MediaFacts
 
 
 class StrictModel(BaseModel):
@@ -16,11 +16,9 @@ class StrictModel(BaseModel):
 class GlobalDishContext(StrictModel):
     food_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
-    name_normalized: str = Field(min_length=1)
+    normalized_name: str = Field(min_length=1)
     aliases: list[str] = Field(default_factory=list)
     category: str
-    nutrients_per_unit: dict[str, float] = Field(default_factory=dict)
-    source: str
 
 
 class GlobalCategoryContext(StrictModel):
@@ -33,61 +31,59 @@ class GlobalCategoryContext(StrictModel):
 class HouseholdPortionContext(StrictModel):
     category: str
     portion_unit: str
+    portion_grams: float = Field(gt=0)
     portion_count: float = Field(gt=0)
-    effective_portion_grams: float = Field(gt=0)
     is_custom: bool
 
 
-class ManualResolverInput(StrictModel):
-    meal_id: str = Field(min_length=1)
-    dish_name: str = Field(min_length=1)
-    servings: float = Field(gt=0)
+class MediaResolverInput(StrictModel):
+    facts: MediaFacts
     global_dishes: list[GlobalDishContext]
     global_categories: list[GlobalCategoryContext]
     household_portions: list[HouseholdPortionContext]
+    fallback_names: dict[str, str] = Field(default_factory=dict)
 
 
-class ManualResolution(StrictModel):
-    action: Literal["match_existing", "create_new", "unresolved"]
+class MediaResolutionDecision(StrictModel):
+    evidence_id: str = Field(min_length=1)
+    action: Literal["match_existing", "create_new"]
     selected_food_id: str | None = None
     category: str | None = None
     canonical_name: str | None = None
-    nutrients_per_unit: NutrientsPerUnit | None = None
-    updated_meal_id: str | None = None
     confidence: Literal["high", "medium", "low"]
     reason: str = Field(min_length=1)
 
     @model_validator(mode="after")
-    def action_fields_are_consistent(self) -> ManualResolution:
+    def normalize_action_fields(self) -> MediaResolutionDecision:
         if self.action == "match_existing":
             if not self.selected_food_id:
                 raise ValueError("Existing matches require selected_food_id")
             self.category = None
             self.canonical_name = None
-            self.nutrients_per_unit = None
-        elif self.action == "create_new":
-            if (
-                not self.selected_food_id
-                or not self.category
-                or not self.canonical_name
-                or not self.nutrients_per_unit
-            ):
-                raise ValueError(
-                    "New dishes require the tool-returned food ID, category, canonical name, and one-unit nutrition"
-                )
-        else:
-            self.selected_food_id = None
-            self.category = None
-            self.canonical_name = None
-            self.nutrients_per_unit = None
-            self.updated_meal_id = None
         return self
 
 
-class ResolvedManualDish(StrictModel):
+class MediaResolutionPlan(StrictModel):
+    decisions: list[MediaResolutionDecision]
+
+
+class ResolvedMediaDish(StrictModel):
+    evidence_id: str
     food_id: str
     name: str
     category: str
     confidence: Literal["high", "medium", "low"]
     action: Literal["match_existing", "create_new"]
-    updated_meal_id: str
+
+
+class MediaMealResolverRunResult(StrictModel):
+    dishes: list[ResolvedMediaDish]
+    plan: MediaResolutionPlan
+    model: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_usd: float | None = None
+    prompt_name: str
+    prompt_version: str | None = None
+    prompt_source: str
+    raw_metadata: dict[str, Any] = Field(default_factory=dict)

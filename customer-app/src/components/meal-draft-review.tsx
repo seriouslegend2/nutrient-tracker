@@ -4,9 +4,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { api, type MealDraftConfirmResponse } from '@/lib/api-client'
+import { formatNutrientValue, otherNutrients } from '@/lib/nutrients'
 import {
   buildMealDraftConfirmRequest,
   calculateMealDraftTotals,
+  mealDraftItemGrams,
   parseMediaMealDraft,
   type MealDraftReviewItem,
 } from '@/lib/meal-draft'
@@ -37,8 +39,10 @@ export function MealDraftReview({
   const queryClient = useQueryClient()
   const [draft] = useState(() => parseMediaMealDraft(payload))
   const [items, setItems] = useState<MealDraftReviewItem[]>(() => draft?.items ?? [])
-  const [mealDate, setMealDate] = useState(initialDate)
-  const [mealSlot, setMealSlot] = useState(isMealSlot(initialSlot) ? initialSlot : suggestedMealSlot())
+  const [mealDate, setMealDate] = useState(() => draft?.mealDate ?? initialDate)
+  const [mealSlot, setMealSlot] = useState(() => isMealSlot(draft?.mealType)
+    ? draft.mealType
+    : isMealSlot(initialSlot) ? initialSlot : suggestedMealSlot())
   const [discarded, setDiscarded] = useState(false)
   const [confirmedCount, setConfirmedCount] = useState<number | null>(null)
 
@@ -129,15 +133,14 @@ export function MealDraftReview({
       <div className="mt-4 rounded-2xl p-4" style={{ background: 'var(--color-surface-soft)' }}>
         <p className="text-sm font-semibold">Estimated total</p>
         {hasNutrition ? (
-          <NutritionLine nutrients={totals.nutrients} prominent />
+          <>
+            <NutritionLine nutrients={totals.nutrients} prominent />
+            <OtherNutrientsLine nutrients={totals.nutrients} />
+          </>
         ) : (
           <p className="mt-1 text-sm" style={{ color: 'var(--color-tx2)' }}>No resolved nutrition yet.</p>
         )}
-        {totals.unresolvedItems > 0 && (
-          <p className="mt-1 text-xs" style={{ color: 'var(--color-tx2)' }}>
-            {totals.unresolvedItems} unresolved {totals.unresolvedItems === 1 ? 'item is' : 'items are'} not included in this estimate.
-          </p>
-        )}
+        <p className="mt-1 text-xs tabular-nums" style={{ color: 'var(--color-tx2)' }}>{formatNumber(totals.totalGrams)} g total</p>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-2">
@@ -157,10 +160,10 @@ function DraftItem({ item, onChange, onRemove }: {
   onChange: (item: MealDraftReviewItem) => void
   onRemove: () => void
 }) {
-  const step = item.measurement === 'grams' ? 10 : 0.5
+  const step = 0.25
   const adjust = (delta: number) => {
-    const amount = Math.max(step, Math.round((item.amount + delta) * 10) / 10)
-    onChange({ ...item, amount })
+    const servings = Math.max(step, Math.round((item.servings + delta) * 100) / 100)
+    onChange({ ...item, servings })
   }
   const hasNutrition = Object.keys(item.nutrients).length > 0
 
@@ -168,46 +171,56 @@ function DraftItem({ item, onChange, onRemove }: {
     <article className="rounded-2xl border p-3.5" style={{ borderColor: 'var(--color-line)' }}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="font-bold">{item.resolvedName ?? item.name}</h3>
-          {item.resolvedName && item.resolvedName !== item.name && (
+          <h3 className="font-bold">{item.resolvedName}</h3>
+          {item.resolvedName !== item.name && (
             <p className="mt-0.5 text-xs" style={{ color: 'var(--color-accent-strong)' }}>Detected as {item.name}</p>
           )}
-          {(item.range || item.confidence) && (
-            <p className="mt-0.5 text-xs" style={{ color: 'var(--color-tx2)' }}>
-              {item.range ? `Roughly ${formatNumber(item.range.low)}-${formatNumber(item.range.high)} g` : 'Mass range unavailable'}
-              {item.confidence ? ` · ${item.confidence} confidence` : ''}
-            </p>
-          )}
-          {item.householdAmount != null && item.householdUnit && (
-            <p className="mt-0.5 text-xs" style={{ color: 'var(--color-tx2)' }}>
-              Household portion: {formatNumber(item.householdAmount)} {item.householdUnit}
-            </p>
-          )}
+          <p className="mt-0.5 text-xs" style={{ color: 'var(--color-tx2)' }}>
+            Fixed serving: 1 {item.servingUnit} = {formatNumber(item.gramsPerServing)} g
+          </p>
+          <p className="mt-0.5 text-xs" style={{ color: 'var(--color-tx2)' }}>
+            {amountSourceLabel(item.amountSource)}
+            {item.range ? ` · estimated range ${formatNumber(item.range.low)}-${formatNumber(item.range.high)} g` : ''}
+            {item.confidence ? ` · ${item.confidence} confidence` : ''}
+          </p>
         </div>
         <button type="button" className="min-h-0 text-sm font-semibold" style={{ color: 'var(--color-danger)' }} onClick={onRemove}>Remove</button>
       </div>
 
       <div className="mt-3 flex items-center gap-2">
-        <button type="button" className="action-button-secondary w-12 shrink-0 px-0" aria-label={`Decrease ${item.name}`} onClick={() => adjust(-step)}>-</button>
+        <button type="button" className="action-button-secondary w-12 shrink-0 px-0" aria-label={`Decrease ${item.resolvedName} servings`} onClick={() => adjust(-step)}>-</button>
         <label className="min-w-0 flex-1 text-center text-xs font-semibold" style={{ color: 'var(--color-tx2)' }}>
-          {item.measurement === 'grams' ? 'Grams' : 'Portions'}
+          Servings
           <div className="relative mt-1">
-            <input type="number" min={step} step={step} className="input pr-10 text-center tabular-nums" value={item.amount}
+            <input type="number" min={step} step={step} className="input pr-16 text-center tabular-nums" value={item.servings}
               onChange={(event) => {
-                const amount = Number(event.target.value)
-                if (Number.isFinite(amount) && amount > 0) onChange({ ...item, amount })
+                const servings = Number(event.target.value)
+                if (Number.isFinite(servings) && servings > 0) onChange({ ...item, servings })
               }} />
-            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs">{item.unit}</span>
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs">{item.servingUnit}</span>
           </div>
         </label>
-        <button type="button" className="action-button-secondary w-12 shrink-0 px-0" aria-label={`Increase ${item.name}`} onClick={() => adjust(step)}>+</button>
+        <button type="button" className="action-button-secondary w-12 shrink-0 px-0" aria-label={`Increase ${item.resolvedName} servings`} onClick={() => adjust(step)}>+</button>
       </div>
 
-      {hasNutrition ? <NutritionLine nutrients={calculateMealDraftTotals([item]).nutrients} /> : (
-        <p className="mt-2 text-xs" style={{ color: 'var(--color-tx2)' }}>Nutrition unresolved. It is not included in the estimate.</p>
+      <p className="mt-2 text-xs font-semibold tabular-nums" style={{ color: 'var(--color-tx2)' }}>
+        {formatNumber(item.servings)} {item.servingUnit} · {formatNumber(mealDraftItemGrams(item))} g
+      </p>
+      {hasNutrition ? (() => {
+        const nutrients = calculateMealDraftTotals([item]).nutrients
+        return <><NutritionLine nutrients={nutrients} /><OtherNutrientsLine nutrients={nutrients} /></>
+      })() : (
+        <p className="mt-2 text-xs" style={{ color: 'var(--color-tx2)' }}>No nutrition is available for this dish.</p>
       )}
     </article>
   )
+}
+
+function amountSourceLabel(source: string | null): string {
+  if (source === 'agent1_user_stated') return 'Quantity provided by you'
+  if (source === 'agent1_document_declared') return 'Quantity read from the document'
+  if (source === 'agent1_visible' || source === 'agent1_estimated') return 'Quantity estimated by Agent 1'
+  return 'Quantity supplied by Agent 1'
 }
 
 function NutritionLine({ nutrients, prominent = false }: { nutrients: Record<string, number>; prominent?: boolean }) {
@@ -216,8 +229,19 @@ function NutritionLine({ nutrients, prominent = false }: { nutrients: Record<str
     nutrients.protein_g != null ? `P ${formatNumber(nutrients.protein_g)} g` : null,
     nutrients.carbs_g != null ? `C ${formatNumber(nutrients.carbs_g)} g` : null,
     nutrients.fat_g != null ? `F ${formatNumber(nutrients.fat_g)} g` : null,
+    nutrients.fiber_g != null ? `Fiber ${formatNumber(nutrients.fiber_g)} g` : null,
   ].filter(Boolean)
   return <p className={`${prominent ? 'mt-1 text-lg font-bold' : 'mt-2 text-xs font-semibold'} tabular-nums`} style={{ color: prominent ? 'var(--color-tx)' : 'var(--color-tx2)' }}>{values.join(' · ')}</p>
+}
+
+function OtherNutrientsLine({ nutrients }: { nutrients: Record<string, number> }) {
+  const values = otherNutrients(nutrients)
+  if (!values.length) return null
+  return (
+    <p className="mt-1 text-xs tabular-nums" style={{ color: 'var(--color-tx2)' }}>
+      {values.map((item) => `${item.label} ${formatNutrientValue(item.value)} ${item.unit}`).join(' · ')}
+    </p>
+  )
 }
 
 function formatNumber(value: number): string {

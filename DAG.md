@@ -19,9 +19,19 @@ backend/app/core/{security,deps,pagination,error_handlers}.py
   -> backend/app/router_registry/__init__.py
   -> backend/app/main.py
 
-backend/app/services/media_extraction.py
-  -> backend/app/agents/media_extraction/{agent,runner,state}.py
-  -> backend/app/api/v1/messages_router.py
+backend/app/agents/media_facts/{agent,models,prompt,runner,state}.py
+  -> backend/app/agents/media_meal_resolver/{agent,models,prompt,runner}.py
+  -> backend/app/services/media_meal_draft.py
+  -> editable image/PDF draft in backend/app/api/v1/messages_router.py
+  -> meal write only at POST /messages/{id}/confirm
+
+manual meal submission
+  -> backend/app/agents/manual_meal_resolver/{agent,models,prompt,runner}.py
+  -> backend/app/domain/meals/service.py
+  -> immediate meal write
+
+backend/app/services/speech_to_text.py
+  -> transcript as user message to nutrition_chat
 
 backend/app/domain/{dishes,meals,goals,profile,reports,water,messages}/**
   -> backend/app/agents/nutrition_chat/{agent,runner,tools,middleware,models,prompt,render,state}.py
@@ -79,7 +89,9 @@ customer or dashboard logout
 - `seeds/seed_dishes.py` is optional after migration and contains 61 curated
   dish rows. Category defaults come from migration 10 in the order above.
   There is no demo-user seed.
-- The only implemented agents are `nutrition_chat` and `media_extraction`.
+- The implemented agents are `nutrition_chat`, `media_facts`,
+  `media_meal_resolver`, and `manual_meal_resolver`. Speech-to-text is a
+  prompt-free provider service, not an agent.
 - The customer application uses Google OAuth for both first-time signup and
   returning-user login. It exposes no customer email/password or OTP routes.
   The dashboard is sign-in-only; access requires an operator-granted `admin`

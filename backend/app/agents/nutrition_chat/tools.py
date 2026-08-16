@@ -16,6 +16,7 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field, model_validator
 
 from app.domain.dishes import repository as dish_repo
+from app.domain.dishes.resolve import resolve_item as resolve_dish_item
 from app.domain.meals import service as meals_service
 from app.utils.logger import logger
 
@@ -410,10 +411,25 @@ async def identify_unknown_item(
     if not dish:
         return {"status": "ERROR", "message": "Dish not found"}
 
-    await meals_repo.update_meal(
-        user_id, meal_id, {"food_id": food_id, "category": dish["category"]}
+    resolution = await resolve_dish_item(
+        user_id=user_id,
+        dish_name=current["dish_name"],
+        food_id=food_id,
+        category=dish["category"],
+        portions=current["portions"],
     )
-    updated = await meals_service.adjust_item(user_id=user_id, meal_id=meal_id)
+    updated = await meals_repo.update_meal(
+        user_id,
+        meal_id,
+        {
+            "food_id": food_id,
+            "category": dish["category"],
+            "portion_unit": resolution.portion_unit,
+            "grams": resolution.grams,
+            "nutrients": resolution.nutrients,
+            "resolved_from": resolution.resolved_from,
+        },
+    )
     return {"status": "OK", "meal": updated}
 
 

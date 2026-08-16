@@ -18,9 +18,9 @@ from app.agents.manual_meal_resolver.models import (
     ManualResolution,
     ManualResolverInput,
     ResolvedManualDish,
-    UnitNutrients,
 )
 from app.agents.manual_meal_resolver.prompt import MANUAL_MEAL_RESOLVER_USER_PROMPT
+from app.domain.dishes.models import NutrientsPerUnit
 from app.services.prompts import ResolvedPrompt
 
 
@@ -279,7 +279,7 @@ async def test_runner_accepts_the_food_id_returned_by_the_creation_tool(monkeypa
                 selected_food_id="dish-new",
                 category="fruit",
                 canonical_name="Amla",
-                nutrients_per_unit=UnitNutrients(
+                nutrients_per_unit=NutrientsPerUnit(
                     protein_g=1.08, carbs_g=12.24, fat_g=0.72
                 ),
                 updated_meal_id="meal-2",

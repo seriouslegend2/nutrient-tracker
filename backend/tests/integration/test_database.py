@@ -410,8 +410,8 @@ def test_chain_uses_fixed_category_unit_with_optional_dish_nutrition_override() 
                 user_id, category, portion_unit, portion_grams, source)
             VALUES ('{USER_ID}', 'dal_gravy', 'katori', 200, 'manual');
             INSERT INTO dish_household (
-                user_id, dish_id, portion_unit, portion_grams)
-            VALUES ('{USER_ID}', '{dish}', 'katori', 220);"""
+                    user_id, dish_id, portion_unit, portion_grams, nutrients_per_unit)
+                VALUES ('{USER_ID}', '{dish}', 'katori', 220, '{{"protein_g": 15}}');"""
     )
 
     level = psql(f"SELECT resolved_from FROM fn_resolve_portion('{USER_ID}','{dish}',NULL);")
@@ -471,9 +471,12 @@ def test_legacy_per_100g_columns_are_removed() -> None:
     assert columns == "0"
 
 
-def test_unresolvable_returns_unknown_rather_than_guessing() -> None:
-    level = psql(f"SELECT resolved_from FROM fn_resolve_portion('{USER_ID}',NULL,NULL);")
-    assert level == "unknown"
+def test_missing_identity_uses_the_fixed_unknown_category() -> None:
+    level = psql(
+        f"SELECT resolved_from || ',' || portion_unit || ',' || portion_grams "
+        f"FROM fn_resolve_portion('{USER_ID}',NULL,NULL);"
+    )
+    assert level == "category_global,g,1"
 
 
 def test_agent_global_dish_creation_is_idempotent_and_unit_based() -> None:
@@ -953,7 +956,17 @@ def test_security_definer_functions_are_service_role_only() -> None:
 
 def test_category_global_is_fully_seeded() -> None:
     count = psql("SELECT count(*) FROM category_global WHERE is_active;")
-    assert int(count) == 18, "all 18 categories must be seeded - level 5 must always answer"
+    assert int(count) == 19, "all fixed categories must be seeded - level 5 must always answer"
+
+
+def test_unknown_category_is_a_fixed_one_gram_fallback() -> None:
+    definition = psql(
+        "SELECT portion_unit || ',' || portion_grams || ',' || portion_count "
+        "FROM category_global WHERE category='unknown' AND is_active;"
+    )
+    assert definition == "g,1,1"
+    with pytest.raises(AssertionError, match="globally immutable"):
+        psql("UPDATE category_global SET portion_grams=2 WHERE category='unknown' AND is_active;")
 
 
 def test_weight_based_categories_use_one_human_serving() -> None:

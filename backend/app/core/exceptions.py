@@ -101,12 +101,12 @@ class IncompleteProfileError(ValidationError):
 
 
 class UnresolvedDishError(ValidationError):
-    """We could not establish a portion. Ask - never guess silently."""
+    """We could not establish a portion from the serving catalog."""
 
     def __init__(self, dish_name: str) -> None:
         super().__init__(
             f"Could not work out a portion size for '{dish_name}'.",
             code="UNRESOLVED_PORTION",
-            suggested_action="Tell us how much you had, in grams or in katoris.",
+            suggested_action="Choose a matching dish or try a more specific food name.",
             context={"dish_name": dish_name},
         )

@@ -37,11 +37,11 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
-from supabase import AsyncClient, acreate_client
-from supabase.lib.client_options import AsyncClientOptions
-
 from app.config.settings import settings
 from app.utils.logger import logger
+from supabase.lib.client_options import AsyncClientOptions
+
+from supabase import AsyncClient, acreate_client
 
 # Yield factors: cooked grams per raw gram. Used to convert IFCT raw values.
 YIELD = {

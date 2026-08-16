@@ -9,8 +9,9 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from app.agents.manual_meal_resolver.models import UnitNutrients
 from app.domain.dishes import repository as dish_repo
+from app.domain.dishes import service as dish_service
+from app.domain.dishes.models import CatalogActor, CatalogAuditIdentity, NutrientsPerUnit
 from app.domain.dishes.resolve import resolve_item
 from app.domain.meals import repository as meal_repo
 
@@ -40,7 +41,7 @@ def _context(config: RunnableConfig) -> tuple[str | None, str | None]:
 class CreateGlobalDishInput(BaseModel):
     canonical_name: str = Field(min_length=1)
     category: str = Field(min_length=1)
-    nutrients_per_unit: UnitNutrients
+    nutrients_per_unit: NutrientsPerUnit
     alias: str | None = None
 
 
@@ -52,7 +53,7 @@ async def create_global_dish(
     alias: str | None = None,
     config: RunnableConfig = None,
 ) -> dict[str, Any]:
-    """Create an idempotent global dish from a validated per-100g nutrient estimate."""
+    """Create an idempotent global dish for one fixed category unit."""
     user_id, _ = _context(config)
     if not user_id:
         return {"status": "ERROR", "message": "No authenticated user in context"}
@@ -61,25 +62,26 @@ async def create_global_dish(
             "status": "ERROR",
             "message": "Generic or mixed meal descriptions cannot be added to the global catalog",
         }
-    categories = {str(row["category"]) for row in await dish_repo.list_active_categories()}
-    if category not in categories:
-        return {"status": "ERROR", "message": "Category is not in the active static catalog"}
-    nutrients = UnitNutrients.model_validate(nutrients_per_unit).model_dump(exclude_none=True)
-    created = await dish_repo.create_global_dish(
-        actor_user_id=user_id,
-        actor="manual_meal_resolver",
-        name=canonical_name,
-        category=category,
-        nutrients_per_unit=nutrients,
-        source="manual_meal_resolver",
-        aliases=[alias] if alias else [],
-    )
+    nutrients = NutrientsPerUnit.model_validate(nutrients_per_unit)
+    try:
+        created = await dish_service.create_global_dish(
+            audit=CatalogAuditIdentity(
+                actor_user_id=user_id,
+                actor=CatalogActor.MANUAL_MEAL_RESOLVER,
+            ),
+            canonical_name=canonical_name,
+            category=category,
+            nutrients_per_unit=nutrients,
+            aliases=[alias] if alias else [],
+        )
+    except ValueError as exc:
+        return {"status": "ERROR", "message": str(exc)}
     return {
         "status": "OK",
         "food_id": str(created["dish_id"]),
         "name": str(created["name"]),
         "category": str(created["category"]),
-        "nutrients_per_unit": nutrients,
+        "nutrients_per_unit": created.get("nutrients_per_unit") or {},
     }
 
 

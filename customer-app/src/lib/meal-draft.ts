@@ -5,27 +5,28 @@ import type {
 
 export type MealDraftReviewItem = {
   id: string
+  evidenceId: string
   name: string
-  resolvedName: string | null
-  amount: number
-  baseAmount: number
-  measurement: 'grams' | 'portions'
-  unit: string
-  gramsPerUnit: number | null
+  resolvedName: string
+  servings: number
+  baseServings: number
+  servingUnit: string
+  gramsPerServing: number
   range: { low: number; high: number } | null
   confidence: string | null
-  householdAmount: number | null
-  householdUnit: string | null
-  foodId: string | null
+  amountSource: string | null
+  foodId: string
   nutrients: Record<string, number>
 }
 
 export type ParsedMealDraft = {
   items: MealDraftReviewItem[]
   sourceKind: string | null
+  mealDate: string | null
+  mealType: string | null
 }
 
-const NUTRIENT_KEYS = new Set(['calories_kcal', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g'])
+const NUTRIENT_KEY = /_(?:g|mg|ug|iu)$/
 
 export function parseMediaMealDraft(payload: unknown): ParsedMealDraft | null {
   if (!isRecord(payload) || !Array.isArray(payload.items)) return null
@@ -37,29 +38,40 @@ export function parseMediaMealDraft(payload: unknown): ParsedMealDraft | null {
   if (!items.length) return null
 
   const source = isRecord(payload.source_metadata) ? payload.source_metadata.kind : null
-  return { items, sourceKind: typeof source === 'string' ? source : null }
+  const firstItem = isRecord(payload.items[0]) ? payload.items[0] : {}
+  return {
+    items,
+    sourceKind: typeof source === 'string' ? source : null,
+    mealDate: firstString(payload.meal_date, firstItem.meal_date),
+    mealType: firstString(payload.meal_type, firstItem.meal_type),
+  }
+}
+
+export function mealDraftItemGrams(item: MealDraftReviewItem): number {
+  return round(item.servings * item.gramsPerServing)
 }
 
 export function calculateMealDraftTotals(items: MealDraftReviewItem[]): {
   nutrients: Record<string, number>
-  unresolvedItems: number
+  totalGrams: number
 } {
   const nutrients: Record<string, number> = {}
-  let unresolvedItems = 0
+  let totalGrams = 0
 
   for (const item of items) {
-    const entries = Object.entries(item.nutrients)
-    if (!entries.length) {
-      unresolvedItems += 1
-      continue
-    }
-    const scale = item.baseAmount > 0 ? item.amount / item.baseAmount : 1
-    for (const [key, value] of entries) {
+    totalGrams += mealDraftItemGrams(item)
+    const scale = item.baseServings > 0 ? item.servings / item.baseServings : 1
+    for (const [key, value] of Object.entries(item.nutrients)) {
       nutrients[key] = (nutrients[key] ?? 0) + value * scale
     }
   }
 
-  return { nutrients, unresolvedItems }
+  return {
+    nutrients: Object.fromEntries(
+      Object.entries(nutrients).map(([key, value]) => [key, round(value)])
+    ),
+    totalGrams: round(totalGrams),
+  }
 }
 
 export function buildMealDraftConfirmRequest(
@@ -71,15 +83,12 @@ export function buildMealDraftConfirmRequest(
     meal_date: mealDate,
     meal_type: mealType,
     items: items.map((item) => ({
-      dish_name: item.resolvedName ?? item.name,
-      grams: item.measurement === 'grams'
-        ? item.amount
-        : item.gramsPerUnit != null
-          ? round(item.amount * item.gramsPerUnit)
-          : null,
-      portions: item.measurement === 'portions' ? item.amount : 1,
-      portion_unit: item.measurement === 'grams' ? 'g' : item.unit,
-      ...(item.foodId ? { food_id: item.foodId } : {}),
+      evidence_id: item.evidenceId,
+      dish_name: item.resolvedName,
+      food_id: item.foodId,
+      grams: mealDraftItemGrams(item),
+      portions: item.servings,
+      portion_unit: item.servingUnit,
       ...(item.confidence ? { confidence: item.confidence } : {}),
     })),
   }
@@ -88,36 +97,37 @@ export function buildMealDraftConfirmRequest(
 function parseItem(value: unknown, index: number): MealDraftReviewItem | null {
   if (!isRecord(value)) return null
   const item = value as Partial<MediaMealDraftItem>
-  const name = typeof item.name === 'string' ? item.name.trim() : ''
-  if (!name) return null
-
+  const name = firstString(item.name)
+  const resolvedName = firstString(item.resolved_name)
+  const foodId = firstString(item.food_id)
+  const evidenceId = firstString(item.evidence_id)
   const portionMetadata = isRecord(item.portion_metadata) ? item.portion_metadata : null
-  const grams = firstPositive(item.total_grams, item.estimated_mass_g)
-  const householdAmount = firstPositive(
-    portionMetadata?.portion_count, item.portions, item.portion_count, item.quantity, item.count
-  )
-  const householdUnit = firstString(
-    portionMetadata?.portion_unit, item.portion_unit, item.unit, item.container
-  )
-  const gramsPerUnit = firstPositive(portionMetadata?.portion_grams)
-  const canUseHouseholdUnit = grams != null && gramsPerUnit != null && householdUnit != null && householdUnit !== 'g'
-  const measurement = canUseHouseholdUnit || grams == null ? 'portions' : 'grams'
-  const amount = canUseHouseholdUnit ? round(grams / gramsPerUnit) : grams ?? householdAmount ?? 1
+  const servingUnit = firstString(portionMetadata?.portion_unit, item.portion_unit)
+  const gramsPerServing = firstPositive(portionMetadata?.portion_grams)
+  if (!name || !resolvedName || !foodId || !evidenceId || !servingUnit || gramsPerServing == null) {
+    return null
+  }
+
+  const totalGrams = firstPositive(item.total_grams, item.estimated_mass_g)
+  const servings = firstPositive(
+    item.servings,
+    item.portions,
+    totalGrams != null ? totalGrams / gramsPerServing : null,
+  ) ?? 1
 
   return {
-    id: `${index}-${name}`,
+    id: `${index}-${evidenceId}`,
+    evidenceId,
     name,
-    resolvedName: firstString(item.resolved_name),
-    amount,
-    baseAmount: amount,
-    measurement,
-    unit: measurement === 'grams' ? 'g' : householdUnit ?? 'serving',
-    gramsPerUnit: measurement === 'portions' ? gramsPerUnit : null,
+    resolvedName,
+    servings,
+    baseServings: servings,
+    servingUnit,
+    gramsPerServing,
     range: parseRange(item.mass_range_g),
     confidence: parseConfidence(item.confidence),
-    householdAmount,
-    householdUnit,
-    foodId: typeof item.food_id === 'string' ? item.food_id : null,
+    amountSource: firstString(item.amount_source),
+    foodId,
     nutrients: parseNutrients(value),
   }
 }
@@ -128,15 +138,18 @@ function parseNutrients(item: Record<string, unknown>): Record<string, number> {
   for (const candidate of candidates) {
     if (!isRecord(candidate)) continue
     for (const [key, value] of Object.entries(candidate)) {
-      if (NUTRIENT_KEYS.has(key) && finiteNumber(value) != null) nutrients[key] = Number(value)
+      if (isNutrientKey(key) && finiteNumber(value) != null) nutrients[key] = Number(value)
     }
   }
-  for (const key of NUTRIENT_KEYS) {
-    const value = finiteNumber(item[key])
-    if (value != null) nutrients[key] = value
+  for (const [key, candidate] of Object.entries(item)) {
+    const value = finiteNumber(candidate)
+    if (isNutrientKey(key) && value != null) nutrients[key] = value
   }
-
   return nutrients
+}
+
+function isNutrientKey(key: string): boolean {
+  return key === 'calories_kcal' || NUTRIENT_KEY.test(key)
 }
 
 function parseRange(value: unknown): { low: number; high: number } | null {

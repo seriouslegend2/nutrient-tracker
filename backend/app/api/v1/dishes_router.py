@@ -93,7 +93,7 @@ async def list_categories(
     user: CurrentUser = Depends(get_current_user),
     params: PaginationParams = Depends(pagination),
 ) -> Page[CategoryPortionResponse]:
-    """The 18 categories: global defaults with my overrides applied and flagged.
+    """The fixed categories: global defaults with my overrides applied and flagged.
 
     This drives the portion picker in one query - no unit logic in the client.
     Paginated like every other list route: the set is bounded at 18 today, but

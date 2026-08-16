@@ -142,8 +142,6 @@ async def create_global_dish(
 async def set_dish_household(
     user_id: str,
     dish_id: str,
-    portion_unit: str,
-    portion_grams: float,
     nutrients_per_unit: dict[str, Any] | None = None,
     note: str | None = None,
 ) -> dict[str, Any]:
@@ -153,8 +151,6 @@ async def set_dish_household(
         {
             "p_user_id": user_id,
             "p_dish_id": dish_id,
-            "p_portion_unit": portion_unit,
-            "p_portion_grams": portion_grams,
             "p_nutrients_per_unit": nutrients_per_unit,
             "p_note": note,
         },

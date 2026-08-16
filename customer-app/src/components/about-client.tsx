@@ -11,7 +11,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   idli: 'Idli', dosa: 'Dosa', protein_main: 'Chicken / fish / mutton', paneer_tofu: 'Paneer / tofu',
   egg: 'Egg', curd_raita: 'Curd / raita', salad_raw: 'Salad', fruit: 'Fruit',
   beverage_milk: 'Milk / lassi', beverage_hot: 'Tea / coffee', snack_fried: 'Fried snack',
-  sweet: 'Sweet', nuts_seeds: 'Nuts', fat_oil: 'Oil / ghee',
+  sweet: 'Sweet', nuts_seeds: 'Nuts', fat_oil: 'Oil / ghee', unknown: 'Unknown item',
 }
 
 export function AboutClient() {

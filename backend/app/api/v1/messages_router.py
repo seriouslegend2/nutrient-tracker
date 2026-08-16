@@ -12,7 +12,6 @@ reference, the raw output and a status the message needs anyway.
 
 from __future__ import annotations
 
-import base64
 import json
 from datetime import date
 from typing import Any, Literal
@@ -20,16 +19,16 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.agents.media_extraction import run_media_extraction_agent
+from app.agents.media_facts.runner import run_media_facts_agent, validate_media_upload
 from app.agents.nutrition_chat.runner import run_nutrition_chat_agent
 from app.core.deps import CurrentUser, get_current_user
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.pagination import Page, PaginationParams, pagination
 from app.domain.dishes import repository as dish_repo
 from app.domain.meals import service as meals_service
-from app.domain.meals.drafts import enrich_media_payload
 from app.domain.messages import repository as message_repo
-from app.services.media_extraction import validate_media_upload
+from app.services.media_meal_draft import build_media_meal_draft
+from app.services.speech_to_text import transcribe_audio, validate_audio_upload
 from app.utils.logger import logger
 
 router = APIRouter(prefix="/messages", tags=["messages"])
@@ -65,6 +64,7 @@ class ConfirmationItem(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
 
     dish_name: str = Field(..., min_length=1)
+    evidence_id: str | None = None
     food_id: str | None = None
     grams: float | None = Field(None, gt=0)
     portions: float = Field(1.0, gt=0)
@@ -79,7 +79,7 @@ class ConfirmationItem(BaseModel):
             raise ValueError("Dish name cannot be blank")
         return value
 
-    @field_validator("food_id", "portion_unit", "confidence", mode="before")
+    @field_validator("evidence_id", "food_id", "portion_unit", "confidence", mode="before")
     @classmethod
     def normalise_optional_text(cls, value: Any) -> Any:
         if value is None:
@@ -103,7 +103,11 @@ def _agent_messages(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
             continue
         content = row.get("msg_text") or ""
         payload = row.get("payload") or {}
-        if row.get("direction") == "inbound" and payload:
+        if (
+            row.get("direction") == "inbound"
+            and row.get("status") == "needs_confirmation"
+            and payload
+        ):
             content += "\n\nStructured media draft (not yet confirmed): " + json.dumps(
                 payload, separators=(",", ":")
             )
@@ -146,7 +150,7 @@ async def send_message(
     thread_id: str | None = Form(None),
     file: UploadFile | None = File(None),
 ) -> list[MessageResponse]:
-    """Normalize uploaded media, then run every successful turn through chat."""
+    """Route text and transcribed audio to chat; route visual media to review."""
     if not file and not (text or "").strip():
         raise ValidationError(
             "Send a message or attach a file.",
@@ -159,7 +163,12 @@ async def send_message(
     mtype = _msg_type(mime)
     file_bytes: bytes | None = None
     if file:
-        validation_error = validate_media_upload(mime, file.size or 0)
+        if mtype in {"image", "pdf"}:
+            validation_error = validate_media_upload(mime, file.size or 0)
+        elif mtype == "audio":
+            validation_error = validate_audio_upload(mime, file.size or 0)
+        else:
+            validation_error = f"Unsupported file type: {mime}"
         if validation_error:
             raise ValidationError(
                 validation_error,
@@ -167,7 +176,10 @@ async def send_message(
                 suggested_action="Attach a supported image, audio file, or PDF within the limit.",
             )
         file_bytes = await file.read()
-        validation_error = validate_media_upload(mime, len(file_bytes))
+        if mtype in {"image", "pdf"}:
+            validation_error = validate_media_upload(mime, len(file_bytes))
+        else:
+            validation_error = validate_audio_upload(mime, len(file_bytes))
         if validation_error:
             raise ValidationError(
                 validation_error,
@@ -191,51 +203,113 @@ async def send_message(
         row["thread_id"] = thread_id
     inbound = await message_repo.create_message(row)
     normalized_text = (text or "").strip()
-    extraction_payload: dict[str, Any] = {}
+    draft_payload: dict[str, Any] = {}
 
-    if file:
+    if file and mtype in {"image", "pdf"}:
         await message_repo.update_message(
             user_id=user.id,
             message_id=inbound["id"],
             patch={"status": "processing"},
         )
-        data_b64 = base64.b64encode(file_bytes or b"").decode()
-        extraction = await run_media_extraction_agent(
-            user_id=user.id,
-            thread_id=inbound["thread_id"],
-            mime_type=mime,
-            data_b64=data_b64,
-            user_text=text,
-            filename=file.filename,
-            samples=3 if mime.startswith("image/") else 1,
-            correlation_id=inbound["correlation_id"],
-        )
-        if not extraction.ok:
+        try:
+            media_result = await run_media_facts_agent(
+                user_id=user.id,
+                thread_id=inbound["thread_id"],
+                mime_type=mime,
+                data=file_bytes or b"",
+                user_note=text,
+                filename=file.filename,
+                correlation_id=inbound["correlation_id"],
+            )
+        except Exception as exc:
+            logger.exception("media_facts_failed user_id={} error={}", user.id, str(exc))
             return await _failure_reply(
                 user_id=user.id,
                 inbound=inbound,
-                detail=extraction.detail or "I couldn't read that attachment.",
+                detail="I couldn't read that attachment. Please try again.",
             )
-        normalized_text = extraction.as_tagged(mtype)
-        if text:
-            normalized_text = f"{normalized_text}\n\nUser note: {text}".strip()
-        extraction_payload = await enrich_media_payload(
-            user_id=user.id, payload=extraction.payload
+        if not media_result.ok or not media_result.facts or not media_result.facts.items:
+            return await _failure_reply(
+                user_id=user.id,
+                inbound=inbound,
+                detail=media_result.detail or "I couldn't find reviewable food evidence.",
+            )
+        try:
+            draft_payload = await build_media_meal_draft(
+                user_id=user.id,
+                thread_id=inbound["thread_id"],
+                facts=media_result.facts,
+                correlation_id=inbound["correlation_id"],
+            )
+        except Exception as exc:
+            logger.exception("meal_resolver_failed user_id={} error={}", user.id, str(exc))
+            return await _failure_reply(
+                user_id=user.id,
+                inbound=inbound,
+                detail="I couldn't prepare that meal draft. Please try again.",
+            )
+        draft_payload.setdefault("source_metadata", {}).update(
+            {"mime_type": mime, "filename": file.filename}
         )
+        updated = await message_repo.update_message(
+            user_id=user.id,
+            message_id=inbound["id"],
+            patch={
+                "msg_text": normalized_text or None,
+                "payload": draft_payload,
+                "status": "needs_confirmation",
+            },
+        )
+        if not updated:
+            raise NotFoundError("Message not found", code="MESSAGE_NOT_FOUND")
+        item_count = len(draft_payload.get("items") or [])
+        review_text = (
+            f"I prepared {item_count} item{'s' if item_count != 1 else ''} from the "
+            "attachment. Review and edit the meal draft before confirming."
+        )
+        reply = await message_repo.create_message(
+            {
+                "user_id": user.id,
+                "thread_id": inbound["thread_id"],
+                "correlation_id": inbound["correlation_id"],
+                "direction": "outbound",
+                "msg_type": "text",
+                "msg_text": review_text,
+                "payload": {"needs_confirmation": True},
+                "status": "not_applicable",
+            }
+        )
+        logger.info("message_processed user_id={} type={} status=needs_confirmation", user.id, mtype)
+        return [MessageResponse(**updated), MessageResponse(**reply)]
 
-    meal_items = extraction_payload.get("items")
-    status = (
-        "needs_confirmation"
-        if isinstance(meal_items, list) and bool(meal_items)
-        else "confirmed"
-    )
+    if file and mtype == "audio":
+        await message_repo.update_message(
+            user_id=user.id,
+            message_id=inbound["id"],
+            patch={"status": "processing"},
+        )
+        try:
+            transcription = await transcribe_audio(
+                data=file_bytes or b"",
+                mime_type=mime,
+                filename=file.filename,
+            )
+            normalized_text = transcription.text
+        except Exception as exc:
+            logger.exception("audio_transcription_failed user_id={} error={}", user.id, str(exc))
+            return await _failure_reply(
+                user_id=user.id,
+                inbound=inbound,
+                detail="I couldn't transcribe that audio. Please try again or type your message.",
+            )
+
     updated = await message_repo.update_message(
         user_id=user.id,
         message_id=inbound["id"],
         patch={
             "msg_text": normalized_text,
-            "payload": extraction_payload,
-            "status": status,
+            "payload": {},
+            "status": "confirmed",
         },
     )
     if not updated:
@@ -249,7 +323,7 @@ async def send_message(
             user_id=user.id,
             thread_id=inbound["thread_id"],
             messages=_agent_messages(history),
-            extraction_payload=extraction_payload,
+            extraction_payload={},
             correlation_id=inbound["correlation_id"],
         )
     except Exception as exc:
@@ -275,7 +349,7 @@ async def send_message(
             "status": "not_applicable",
         }
     )
-    logger.info("message_processed user_id={} type={} status={}", user.id, mtype, status)
+    logger.info("message_processed user_id={} type={} status=confirmed", user.id, mtype)
     return [MessageResponse(**updated), MessageResponse(**reply)]
 
 
@@ -352,10 +426,11 @@ async def confirm_message(
             items.append(
                 ConfirmationItem(
                     dish_name=item.get("resolved_name") or item.get("name") or "Unknown item",
+                    evidence_id=item.get("evidence_id"),
                     food_id=item.get("food_id"),
                     grams=grams,
-                    portions=1.0 if grams is not None else item.get("quantity") or 1.0,
-                    portion_unit="g" if grams is not None else item.get("unit"),
+                    portions=item.get("servings") or item.get("portions") or 1.0,
+                    portion_unit=item.get("portion_unit") or ("g" if grams is not None else None),
                     confidence=confidence,
                 )
             )
@@ -366,6 +441,52 @@ async def confirm_message(
             suggested_action="Review the extraction or add at least one meal item.",
         )
 
+    draft_items = (message.get("payload") or {}).get("items", [])
+    draft_by_evidence = {
+        str(item["evidence_id"]): item
+        for item in draft_items
+        if item.get("evidence_id")
+    }
+    evidence_ids = [item.evidence_id for item in items if item.evidence_id]
+    if len(evidence_ids) != len(set(evidence_ids)):
+        raise ValidationError("A draft item can be confirmed only once.", code="DUPLICATE_DRAFT_ITEM")
+
+    resolved_items: list[dict[str, Any]] = []
+    for item in items:
+        stored = draft_by_evidence.get(item.evidence_id or "") if item.evidence_id else None
+        if item.evidence_id and stored is None:
+            raise ValidationError(
+                "The selected draft item no longer exists.",
+                code="DRAFT_ITEM_NOT_FOUND",
+            )
+        if stored:
+            portion_metadata = stored.get("portion_metadata") or {}
+            portion_grams = portion_metadata.get("portion_grams")
+            try:
+                fixed_grams = float(portion_grams)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError(
+                    "The selected dish has no fixed serving size.",
+                    code="SERVING_SIZE_UNAVAILABLE",
+                ) from exc
+            if fixed_grams <= 0:
+                raise ValidationError(
+                    "The selected dish has no fixed serving size.",
+                    code="SERVING_SIZE_UNAVAILABLE",
+                )
+            resolved_items.append(
+                {
+                    "dish_name": stored.get("resolved_name") or stored.get("name"),
+                    "food_id": stored.get("food_id"),
+                    "grams": round(item.portions * fixed_grams, 2),
+                    "portions": item.portions,
+                    "portion_unit": portion_metadata.get("portion_unit") or "serving",
+                    "confidence": stored.get("confidence") or item.confidence,
+                }
+            )
+        else:
+            resolved_items.append(item.model_dump())
+
     created = []
     source_kind = ((message.get("payload") or {}).get("source_metadata") or {}).get("kind")
     source = {
@@ -373,28 +494,28 @@ async def confirm_message(
         "nutrition_label": "label",
         "food_diary_pdf": "pdf_import",
     }.get(source_kind, "photo" if message["msg_type"] == "image" else "pdf_import")
-    for item in items:
-        if item.food_id and not await dish_repo.get_dish(item.food_id):
+    for item in resolved_items:
+        if item.get("food_id") and not await dish_repo.get_dish(item["food_id"]):
             raise ValidationError(
                 "The selected dish does not exist or is no longer active.",
                 code="DISH_NOT_FOUND",
                 suggested_action="Choose an active dish and confirm again.",
-                context={"food_id": item.food_id},
+                context={"food_id": item["food_id"]},
             )
 
-    for item in items:
+    for item in resolved_items:
         created.append(
             await meals_service.add_item(
                 user_id=user.id,
                 meal_date=body.meal_date,
                 meal_type=body.meal_type,
-                dish_name=item.dish_name,
-                food_id=item.food_id,
-                grams=item.grams,
-                portions=item.portions,
-                portion_unit=item.portion_unit,
+                dish_name=item["dish_name"],
+                food_id=item.get("food_id"),
+                grams=item.get("grams"),
+                portions=item["portions"],
+                portion_unit=item.get("portion_unit"),
                 source=source,
-                confidence=item.confidence,
+                confidence=item.get("confidence"),
             )
         )
 

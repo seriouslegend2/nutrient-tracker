@@ -1,4 +1,4 @@
-"""Nutrition chat agent. Every modality arrives here as normalized text.
+"""Nutrition chat agent for typed messages and speech-to-text transcripts.
 
 This file ONLY builds the agent: resolve model, assemble middleware, wire
 tools, return. No business logic - that lives in tools.py (which delegates to
