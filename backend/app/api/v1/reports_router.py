@@ -23,7 +23,12 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 def _window(date_from: date | None, date_to: date | None) -> tuple[date, date]:
     today = date.today()
-    return (date_from or today - timedelta(days=29)), (date_to or today)
+    start, end = (date_from or today - timedelta(days=29)), (date_to or today)
+    if start > end:
+        raise HTTPException(status_code=422, detail="date_from must be on or before date_to")
+    if (end - start).days > 366:
+        raise HTTPException(status_code=422, detail="Report ranges cannot exceed 367 days")
+    return start, end
 
 
 @router.get("/trend")

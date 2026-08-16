@@ -191,6 +191,28 @@ def evaluate_metric_progress(
         "water_ml": "Hydration",
         "training_days": "Training",
     }
+    calendar = []
+    cursor = starts_on
+    while cursor <= ends_on:
+        actual = actual_by_date.get(cursor)
+        if scope == "activity" and cursor <= as_of:
+            actual = actual or 0.0
+        day_target = daily_targets.get(cursor, target)
+        calendar.append(
+            {
+                "date": cursor.isoformat(),
+                "status": _status(
+                    actual,
+                    day_target,
+                    direction,
+                    future=cursor > as_of,
+                    open_bucket=cursor == as_of,
+                ),
+                "actual": actual,
+                "target": day_target,
+            }
+        )
+        cursor += timedelta(days=1)
     return {
         "metric": metric,
         "label": labels.get(metric, metric.replace("_", " ").title()),
@@ -225,6 +247,7 @@ def evaluate_metric_progress(
             "days_elapsed": days_elapsed,
             "total_days": total_days,
         },
+        "calendar": calendar,
     }
 
 
@@ -454,6 +477,7 @@ def evaluate_goal_progress(
         "cadence": cadence,
         "is_primary": bool(goal.get("is_primary")),
         "label": label,
+        "derivation": dict(goal.get("derivation") or {}),
         "starts_on": starts_on.isoformat(),
         "ends_on": ends_on.isoformat(),
         "today": {

@@ -156,6 +156,43 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--color-accent-s
 }
 .progress-fill { height: 100%; border-radius: inherit; transition: width 500ms ease; }
 
+.media-scan-grid {
+  background-image:
+    linear-gradient(color-mix(in oklch, var(--color-on-accent) 10%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, var(--color-on-accent) 10%, transparent) 1px, transparent 1px),
+    linear-gradient(180deg, transparent 45%, color-mix(in oklch, var(--color-on-accent) 14%, transparent));
+  background-size: 26px 26px, 26px 26px, 100% 100%;
+  animation: media-grid-drift 5s linear infinite;
+}
+.media-scan-frame {
+  border-color: color-mix(in oklch, var(--color-on-accent) 48%, transparent);
+  box-shadow: inset 0 0 22px color-mix(in oklch, var(--color-on-accent) 10%, transparent);
+  animation: media-frame-breathe 1.8s ease-in-out infinite;
+}
+.media-scan-line {
+  top: 8%;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--color-on-accent);
+  box-shadow:
+    0 0 8px var(--color-on-accent),
+    0 8px 24px color-mix(in oklch, var(--color-on-accent) 55%, transparent);
+  animation: media-scan-line 2.4s ease-in-out infinite;
+}
+
+@keyframes media-scan-line {
+  0%, 100% { top: 8%; opacity: 0.35; }
+  50% { top: 90%; opacity: 1; }
+}
+@keyframes media-grid-drift {
+  from { background-position: 0 0, 0 0, 0 0; }
+  to { background-position: 26px 26px, 26px 26px, 0 0; }
+}
+@keyframes media-frame-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(0.995); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
 .action-button,
 .action-button-secondary,
 .action-button-danger {
@@ -227,5 +264,5 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--color-accent-s
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }

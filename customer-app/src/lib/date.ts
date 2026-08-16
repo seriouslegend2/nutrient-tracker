@@ -15,6 +15,14 @@ export function shiftISODate(value: string, days: number): string {
   return localDateISO(date)
 }
 
+export function rollingDateWindow(days: number, dateTo = localDateISO()): {
+  dateFrom: string
+  dateTo: string
+} {
+  const safeDays = Number.isInteger(days) && days > 0 ? days : 1
+  return { dateFrom: shiftISODate(dateTo, -(safeDays - 1)), dateTo }
+}
+
 export function startOfWeekISO(value: string): string {
   const date = new Date(`${value}T12:00:00`)
   const mondayOffset = (date.getDay() + 6) % 7

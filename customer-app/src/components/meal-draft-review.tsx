@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
+import { useMediaAnalysis } from '@/components/media-analysis-provider'
 import { api, type MealDraftConfirmResponse } from '@/lib/api-client'
 import { formatNutrientValue, otherNutrients } from '@/lib/nutrients'
 import {
@@ -24,7 +25,7 @@ type MealDraftReviewProps = {
 }
 
 const INVALIDATION_KEYS = [
-  ['messages'], ['day'], ['meals'], ['goals', 'summary'], ['trend'], ['macros'], ['micros'],
+  ['messages'], ['media-workflows'], ['day'], ['meals'], ['goals', 'summary'], ['trend'], ['macros'], ['micros'],
   ['goal-vs-actual'], ['meal-patterns'], ['nutrient-series'],
 ]
 
@@ -37,6 +38,7 @@ export function MealDraftReview({
   onDiscard,
 }: MealDraftReviewProps) {
   const queryClient = useQueryClient()
+  const { resolveDraft } = useMediaAnalysis()
   const [draft] = useState(() => parseMediaMealDraft(payload))
   const [items, setItems] = useState<MealDraftReviewItem[]>(() => draft?.items ?? [])
   const [mealDate, setMealDate] = useState(() => draft?.mealDate ?? initialDate)
@@ -53,6 +55,7 @@ export function MealDraftReview({
     ),
     onSuccess: async (result) => {
       setConfirmedCount(result.created)
+      resolveDraft(messageId, 'confirmed')
       onConfirmed?.(result)
       await Promise.all(INVALIDATION_KEYS.map((queryKey) =>
         queryClient.invalidateQueries({ queryKey })
@@ -63,8 +66,12 @@ export function MealDraftReview({
     mutationFn: () => api.discardMessage(messageId),
     onSuccess: async () => {
       setDiscarded(true)
+      resolveDraft(messageId, 'discarded')
       onDiscard?.()
-      await queryClient.invalidateQueries({ queryKey: ['messages'] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['messages'] }),
+        queryClient.invalidateQueries({ queryKey: ['media-workflows'] }),
+      ])
     },
   })
 

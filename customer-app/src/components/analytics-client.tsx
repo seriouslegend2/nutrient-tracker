@@ -10,12 +10,12 @@ import {
 
 import { BottomNav } from '@/components/nav'
 import {
-  api, type GoalProgressSummary, type GoalVsActual, type HydrationReport,
+  api, type GoalMetricProgress, type GoalProgressSummary, type GoalProgressSummaryItem, type HydrationReport,
   type MacroSeriesPoint, type Macros, type MealPatterns, type MicroRow,
-  type Micros, type NutrientSeries, type Trend,
+  type Micros, type NutrientSeries, type Profile, type Trend,
 } from '@/lib/api-client'
 import {
-  average, expectedBuckets, reportWindow, TREND_RANGES, type ReportGrouping,
+  average, expectedBuckets, reportWindow, selectGoal, TREND_RANGES, type ReportGrouping,
   type TrendRange,
 } from '@/lib/trends'
 
@@ -28,41 +28,38 @@ export function AnalyticsClient() {
   const report = useMemo(() => reportWindow(range), [range])
   const reportParams = { date_from: report.dateFrom, date_to: report.dateTo, group_by: report.grouping }
 
-  const trend = useQuery({ queryKey: ['trend', reportParams], queryFn: () => api.trend(reportParams) })
-  const macros = useQuery({ queryKey: ['macros', reportParams], queryFn: () => api.macros(reportParams) })
+  const trend = useQuery({ queryKey: ['trend', reportParams], queryFn: () => api.trend(reportParams), staleTime: 0 })
+  const macros = useQuery({ queryKey: ['macros', reportParams], queryFn: () => api.macros(reportParams), staleTime: 0 })
   const micros = useQuery({
     queryKey: ['micros', report.dateFrom, report.dateTo],
-    queryFn: () => api.micros({ date_from: report.dateFrom, date_to: report.dateTo }),
-  })
-  const goalComparison = useQuery({
-    queryKey: ['goal-vs-actual', report.dateFrom, report.dateTo],
-    queryFn: () => api.goalVsActual({ date_from: report.dateFrom, date_to: report.dateTo }),
+    queryFn: () => api.micros({ date_from: report.dateFrom, date_to: report.dateTo }), staleTime: 0,
   })
   const previousTrend = useQuery({
-    queryKey: ['trend', 'previous', range, report.previousDateFrom, report.previousDateTo],
-    queryFn: () => api.trend({ date_from: report.previousDateFrom, date_to: report.previousDateTo, group_by: report.grouping }),
+    queryKey: ['trend', 'previous', range, report.grouping, report.previousDateFrom, report.previousDateTo],
+    queryFn: () => api.trend({ date_from: report.previousDateFrom, date_to: report.previousDateTo, group_by: report.grouping }), staleTime: 0,
   })
   const previousMacros = useQuery({
-    queryKey: ['macros', 'previous', range, report.previousDateFrom, report.previousDateTo],
-    queryFn: () => api.macros({ date_from: report.previousDateFrom, date_to: report.previousDateTo, group_by: report.grouping }),
+    queryKey: ['macros', 'previous', range, report.grouping, report.previousDateFrom, report.previousDateTo],
+    queryFn: () => api.macros({ date_from: report.previousDateFrom, date_to: report.previousDateTo, group_by: report.grouping }), staleTime: 0,
   })
   const patterns = useQuery({
     queryKey: ['meal-patterns', report.dateFrom, report.dateTo],
-    queryFn: () => api.mealPatterns({ date_from: report.dateFrom, date_to: report.dateTo }),
+    queryFn: () => api.mealPatterns({ date_from: report.dateFrom, date_to: report.dateTo }), staleTime: 0,
   })
   const nutrientSeries = useQuery({
     queryKey: ['nutrient-series', reportParams],
-    queryFn: () => api.nutrientSeries({ ...reportParams, nutrient: ['fiber_g', 'sodium_mg'] }),
+    queryFn: () => api.nutrientSeries({ ...reportParams, nutrient: ['fiber_g', 'sodium_mg'] }), staleTime: 0,
   })
   const hydration = useQuery({
     queryKey: ['hydration-report', reportParams],
-    queryFn: () => api.hydrationReport(reportParams),
+    queryFn: () => api.hydrationReport(reportParams), staleTime: 0,
   })
   const goalSummary = useQuery({
     queryKey: ['goal-progress-summary', report.dateTo],
-    queryFn: () => api.goalProgressSummary(report.dateTo),
+    queryFn: () => api.goalProgressSummary(report.dateTo), staleTime: 0,
   })
-  const weights = useQuery({ queryKey: ['weights', 'trends'], queryFn: () => api.weightHistory({ page_size: 200 }) })
+  const weights = useQuery({ queryKey: ['weights', 'trends'], queryFn: () => api.weightHistory({ page_size: 200 }), staleTime: 0 })
+  const me = useQuery({ queryKey: ['me', 'trends'], queryFn: api.me, staleTime: 0 })
 
   return (
     <div className="app-shell trends-shell px-5 pt-6 sm:px-6">
@@ -85,16 +82,14 @@ export function AnalyticsClient() {
       </div>
 
       <nav aria-label="Trends sections" className="mb-4 flex gap-2 overflow-x-auto pb-1">
-        {[['#energy', 'Energy'], ['#eating-pattern', 'Eating pattern'], ['#nutrients', 'Nutrients'], ['#body-water', 'Body & water'], ['#data-quality', 'Data quality']].map(([href, label]) => <a key={href} href={href} className="action-button-secondary shrink-0">{label}</a>)}
+        {[['#energy', 'Energy'], ['#eating-pattern', 'Eating pattern'], ['#nutrients', 'Nutrients'], ['#body-water', 'Body & water'], ['#goals', 'Goals'], ['#data-quality', 'Data quality']].map(([href, label]) => <a key={href} href={href} className="action-button-secondary shrink-0">{label}</a>)}
       </nav>
 
       <EvidenceStrip trend={trend.data} grouping={report.grouping} dateFrom={report.dateFrom} dateTo={report.dateTo} loading={trend.isPending} />
+      <OverviewStrip macros={macros.data} hydration={hydration.data} weights={weights.data?.items ?? []} profile={me.data?.profile} />
 
-      <TrendSection id="energy" title="Energy and goals" detail="Calorie direction and personal target progress.">
-        <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-          <CaloriePanel query={trend} grouping={report.grouping} calorieTarget={findCalorieTarget(goalComparison.data)} />
-          <GoalPanel comparison={goalComparison} />
-        </div>
+      <TrendSection id="energy" title="Energy intake" detail="Recorded calorie intake across the selected period.">
+        <CaloriePanel query={trend} grouping={report.grouping} />
       </TrendSection>
 
       <InsightSummary trend={trend.data} previousTrend={previousTrend.data} macros={macros.data} previousMacros={previousMacros.data} weights={weights.data?.items ?? []} dateFrom={report.dateFrom} />
@@ -113,9 +108,13 @@ export function AnalyticsClient() {
 
       <TrendSection id="body-water" title="Body and water" detail="Recorded water, weight, and waist measurements without diagnostic interpretation.">
         <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-          <WaterPanel query={hydration} goals={goalSummary.data} grouping={report.grouping} />
+          <WaterPanel query={hydration} grouping={report.grouping} />
           <BodyMeasurementsPanel query={weights} dateFrom={report.dateFrom} />
         </div>
+      </TrendSection>
+
+      <TrendSection id="goals" title="Goal progression" detail="Select a goal to compare the path you planned with what has actually been recorded.">
+        <GoalPanel summary={goalSummary} dateFrom={report.dateFrom} dateTo={report.dateTo} />
       </TrendSection>
 
       <TrendSection id="data-quality" title="How this was calculated" detail="Coverage and source information behind the displayed estimates.">
@@ -131,7 +130,7 @@ function EvidenceStrip({ trend, grouping, dateFrom, dateTo, loading }: {
   trend?: Trend; grouping: ReportGrouping; dateFrom: string; dateTo: string; loading: boolean
 }) {
   const buckets = expectedBuckets(dateFrom, dateTo, grouping)
-  const recorded = new Set(trend?.series.map((point) => point.bucket) ?? [])
+  const recorded = new Set(trend?.series.filter((point) => point.calories_kcal != null).map((point) => point.bucket) ?? [])
   const noun = grouping === 'day' ? 'days' : grouping === 'week' ? 'weeks' : 'months'
   return (
     <section className="card mb-4 p-5" aria-labelledby="evidence-heading">
@@ -143,6 +142,46 @@ function EvidenceStrip({ trend, grouping, dateFrom, dateTo, loading }: {
         {buckets.map((bucket) => <span key={bucket} title={`${formatBucket(bucket, grouping)}: ${recorded.has(bucket) ? 'recorded' : 'no recorded nutrition'}`} className="h-3 min-w-1 flex-1 rounded-full" style={{ background: recorded.has(bucket) ? 'var(--color-accent-strong)' : 'var(--color-line)' }} />)}
       </div>
       <p className="mt-3 text-sm" style={{ color: 'var(--color-tx2)' }}>Empty marks mean no nutrition-bearing meal was recorded. Missing food nutrition is never counted as zero.</p>
+    </section>
+  )
+}
+
+function OverviewStrip({ macros, hydration, weights, profile }: {
+  macros?: Macros
+  hydration?: HydrationReport
+  weights: { measured_on: string; weight_kg: number; waist_cm?: number | null }[]
+  profile?: Profile | null
+}) {
+  const perDay = (metric: 'calories_kcal' | 'protein_g' | 'carbs_g' | 'fat_g') => {
+    const values = macros?.series.flatMap((point) => point[metric] == null ? [] : [Number(point[metric])]) ?? []
+    const days = macros?.coverage_days[metric] ?? 0
+    return days && values.length ? values.reduce((sum, value) => sum + value, 0) / days : null
+  }
+  const water = hydration?.logged_days
+    ? hydration.series.reduce((sum, point) => sum + (point.volume_ml ?? 0), 0) / hydration.logged_days
+    : null
+  const body = [...weights].sort((a, b) => a.measured_on.localeCompare(b.measured_on))
+  const latest = body.at(-1)
+  const stats = [
+    { label: 'Energy / recorded day', value: formatStat(perDay('calories_kcal'), 'kcal') },
+    { label: 'Protein / recorded day', value: formatStat(perDay('protein_g'), 'g') },
+    { label: 'Carbs / recorded day', value: formatStat(perDay('carbs_g'), 'g') },
+    { label: 'Fat / recorded day', value: formatStat(perDay('fat_g'), 'g') },
+    { label: 'Water / logged day', value: water == null ? '—' : `${(water / 1000).toFixed(1)} L` },
+    { label: 'Latest weight', value: latest ? `${latest.weight_kg.toFixed(1)} kg` : '—' },
+    { label: 'Latest waist', value: latest?.waist_cm == null ? '—' : `${latest.waist_cm.toFixed(1)} cm` },
+    { label: 'Profile height', value: profile?.height_cm == null ? '—' : `${formatNumber(profile.height_cm)} cm` },
+    { label: 'Current BMI', value: profile?.bmi == null ? '—' : formatNumber(profile.bmi) },
+    { label: 'Estimated BMR', value: profile?.bmr_kcal == null ? '—' : `${Math.round(profile.bmr_kcal).toLocaleString()} kcal` },
+    { label: 'Estimated daily expenditure', value: profile?.tdee_kcal == null ? '—' : `${Math.round(profile.tdee_kcal).toLocaleString()} kcal` },
+  ]
+  return (
+    <section className="card mb-4 p-5 sm:p-6" aria-labelledby="overview-heading">
+      <p className="eyebrow">Selected-period overview</p>
+      <h2 id="overview-heading" className="display-title text-2xl">Your recorded stats</h2>
+      <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
+        {stats.map((stat) => <StatTile key={stat.label} value={stat.value} label={stat.label} />)}
+      </div>
     </section>
   )
 }
@@ -165,41 +204,66 @@ function InsightSummary({ trend, previousTrend, macros, previousMacros, weights,
   )
 }
 
-function CaloriePanel({ query, grouping, calorieTarget }: {
-  query: ReturnType<typeof useQuery<Trend>>; grouping: ReportGrouping; calorieTarget?: number
+function CaloriePanel({ query, grouping }: {
+  query: ReturnType<typeof useQuery<Trend>>; grouping: ReportGrouping
 }) {
   const series = query.data?.series ?? []
-  const mean = average(series.map((point) => point.calories_kcal))
+  const recorded = series.flatMap((point) => point.calories_kcal == null ? [] : [point.calories_kcal])
+  const coveredDays = series.reduce((sum, point) => sum + point.recorded_days, 0)
+  const mean = coveredDays ? recorded.reduce((sum, value) => sum + value, 0) / coveredDays : null
+  const chart = series.map((point) => ({
+    ...point,
+    displayed_calories: grouping === 'day' ? point.calories_kcal : point.daily_average_kcal,
+  }))
   return (
-    <ReportPanel title="Calorie intake" description={`Recorded intake by ${grouping}, with a trailing 7-period average.`} loading={query.isPending} error={query.isError} onRetry={() => query.refetch()} empty={!series.length}>
-      <MetricLine value={mean == null ? '—' : `${Math.round(mean).toLocaleString()} kcal`} label={`average across ${series.length} recorded ${grouping === 'day' ? 'days' : `${grouping}s`}`} />
-      <div role="img" aria-label={`Calorie intake chart with ${series.length} recorded periods`}>
+    <ReportPanel title="Calorie intake" description={`Recorded calories by rolling ${grouping}; grouped periods use an average per covered day so incomplete logging is not treated as zero. The trailing 7-point average appears only when all seven periods have data.`} loading={query.isPending} error={query.isError} onRetry={() => query.refetch()} empty={!recorded.length}>
+      <MetricLine value={mean == null ? '—' : `${Math.round(mean).toLocaleString()} kcal`} label={`average across ${coveredDays} days with calorie data`} />
+      <div role="img" aria-label={`Calorie intake chart across ${series.length} periods`}>
         <ResponsiveContainer width="100%" height={250}>
-          <ComposedChart data={series} margin={{ top: 12, right: 4, left: -10, bottom: 0 }}>
+          <ComposedChart data={chart} margin={{ top: 12, right: 4, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 4" stroke={GRID} vertical={false} />
             <XAxis dataKey="bucket" {...AXIS} tickFormatter={(value) => shortBucket(String(value), grouping)} minTickGap={24} />
             <YAxis {...AXIS} width={48} />
-            <Tooltip contentStyle={TOOLTIP} labelFormatter={(value) => formatBucket(String(value), grouping)} formatter={(value, name) => [`${Math.round(Number(value)).toLocaleString()} kcal`, name === 'rolling_mean' ? 'Rolling average' : 'Recorded intake']} />
-            <Bar dataKey="calories_kcal" fill="var(--color-accent)" radius={[5, 5, 0, 0]} maxBarSize={28} />
+            <Tooltip contentStyle={TOOLTIP} labelFormatter={(value) => formatBucket(String(value), grouping)} formatter={(value, name) => [`${Math.round(Number(value)).toLocaleString()} kcal`, name === 'rolling_mean' ? 'Rolling daily average' : grouping === 'day' ? 'Recorded intake' : 'Average per covered day']} />
+            <Bar dataKey="displayed_calories" fill="var(--color-accent)" radius={[5, 5, 0, 0]} maxBarSize={28} />
             <Line dataKey="rolling_mean" stroke="var(--color-tx)" strokeWidth={2.5} dot={false} connectNulls={false} />
-            {calorieTarget && <ReferenceLine y={calorieTarget} stroke="var(--color-warn)" strokeDasharray="5 4" label={{ value: 'target', fill: 'var(--color-tx2)', fontSize: 12 }} />}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
       {query.data?.unaccounted_items ? <DataWarning>{query.data.unaccounted_items} food item{query.data.unaccounted_items > 1 ? 's were' : ' was'} excluded because nutrition is unknown.</DataWarning> : null}
-      <ChartTable headers={['Period', 'Calories', 'Rolling average']} rows={series.map((point) => [formatBucket(point.bucket, grouping), `${Math.round(point.calories_kcal)} kcal`, `${Math.round(point.rolling_mean)} kcal`])} />
+      <ChartTable headers={['Period', 'Recorded total', 'Average / covered day', 'Rolling daily average', 'Coverage']} rows={series.map((point) => [formatPeriod(point), point.calories_kcal == null ? 'Missing' : `${Math.round(point.calories_kcal)} kcal`, point.daily_average_kcal == null ? 'Missing' : `${Math.round(point.daily_average_kcal)} kcal`, point.rolling_mean == null ? '—' : `${Math.round(point.rolling_mean)} kcal`, `${point.recorded_days}/${point.calendar_days} days (${point.coverage_status})`])} />
     </ReportPanel>
   )
 }
 
 function MacroPanel({ query, grouping }: { query: ReturnType<typeof useQuery<Macros>>; grouping: ReportGrouping }) {
+  const [view, setView] = useState<'grams' | 'share'>('grams')
   const series = query.data?.series ?? []
-  const chart = series.map((point) => ({ bucket: point.bucket, protein: point.pct_of_energy.protein, carbs: point.pct_of_energy.carbs, fat: point.pct_of_energy.fat }))
+  const chart = series.map((point) => ({
+    bucket: point.bucket,
+    protein: view === 'grams' ? point.mean_per_covered_day.protein_g : point.pct_of_energy.protein,
+    carbs: view === 'grams' ? point.mean_per_covered_day.carbs_g : point.pct_of_energy.carbs,
+    fat: view === 'grams' ? point.mean_per_covered_day.fat_g : point.pct_of_energy.fat,
+  }))
   const shares = macroAverages(series)
+  const gramsPerCoveredDay = (metric: 'protein_g' | 'carbs_g' | 'fat_g') => {
+    const coveredDays = query.data?.coverage_days[metric] ?? 0
+    const total = series.reduce((sum, point) => sum + (point[metric] ?? 0), 0)
+    return coveredDays ? total / coveredDays : null
+  }
+  const grams = {
+    protein: gramsPerCoveredDay('protein_g'),
+    carbs: gramsPerCoveredDay('carbs_g'),
+    fat: gramsPerCoveredDay('fat_g'),
+  }
   return (
-    <ReportPanel title="Macros" description={`Protein, carbohydrate, and fat as a share of recorded food energy by ${grouping}.`} loading={query.isPending} error={query.isError} onRetry={() => query.refetch()} empty={!series.length}>
+    <ReportPanel title="Macronutrient breakdown" description={`Protein, carbohydrate, and fat by rolling ${grouping}. Switch between average grams per covered day and percentage of recorded macro energy.`} loading={query.isPending} error={query.isError} onRetry={() => query.refetch()} empty={!series.some((point) => point.protein_g != null || point.carbs_g != null || point.fat_g != null)}>
+      <div className="mb-4 grid grid-cols-2 rounded-2xl border p-1" style={{ borderColor: 'var(--color-line)', background: 'var(--color-surface-soft)' }}>
+        <button onClick={() => setView('grams')} aria-pressed={view === 'grams'} className="rounded-xl px-3 py-2 font-semibold" style={{ background: view === 'grams' ? 'var(--color-surface)' : 'transparent', color: view === 'grams' ? 'var(--color-accent-strong)' : 'var(--color-tx2)' }}>Grams</button>
+        <button onClick={() => setView('share')} aria-pressed={view === 'share'} className="rounded-xl px-3 py-2 font-semibold" style={{ background: view === 'share' ? 'var(--color-surface)' : 'transparent', color: view === 'share' ? 'var(--color-accent-strong)' : 'var(--color-tx2)' }}>Energy share</button>
+      </div>
       <div className="mb-3 grid grid-cols-3 gap-2">
-        {(['protein', 'carbs', 'fat'] as const).map((macro) => <div key={macro} className="rounded-2xl p-3" style={{ background: 'var(--color-surface-soft)' }}><p className="text-sm capitalize" style={{ color: `var(--color-${macro === 'carbs' ? 'carbs' : macro})` }}>{macro}</p><p className="mt-1 text-xl font-bold tabular-nums">{shares[macro] == null ? '—' : `${Math.round(shares[macro]!)}%`}</p><p className="text-sm" style={{ color: 'var(--color-tx2)' }}>{formatRange(query.data?.amdr_reference[macro])}</p></div>)}
+        {(['protein', 'carbs', 'fat'] as const).map((macro) => <div key={macro} className="rounded-2xl p-3" style={{ background: 'var(--color-surface-soft)' }}><p className="text-sm capitalize" style={{ color: `var(--color-${macro})` }}>{macro}</p><p className="mt-1 text-xl font-bold tabular-nums">{grams[macro] == null ? '—' : `${formatNumber(grams[macro]!)} g`}</p><p className="text-sm" style={{ color: 'var(--color-tx2)' }}>{shares[macro] == null ? 'Share unavailable' : `${Math.round(shares[macro]!)}% energy · ${formatRange(query.data?.amdr_reference[macro])}`}</p></div>)}
       </div>
       <MacroLegend />
       <div role="img" aria-label={`Macro energy share chart with ${series.length} recorded periods`}>
@@ -207,53 +271,115 @@ function MacroPanel({ query, grouping }: { query: ReturnType<typeof useQuery<Mac
           <LineChart data={chart} margin={{ top: 10, right: 5, left: -14, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 4" stroke={GRID} vertical={false} />
             <XAxis dataKey="bucket" {...AXIS} tickFormatter={(value) => shortBucket(String(value), grouping)} minTickGap={24} />
-            <YAxis {...AXIS} width={42} domain={[0, 100]} tickFormatter={(value) => `${value}%`} />
-            <Tooltip contentStyle={TOOLTIP} formatter={(value, name) => [`${Number(value).toFixed(1)}%`, String(name)]} labelFormatter={(value) => formatBucket(String(value), grouping)} />
+            <YAxis {...AXIS} width={42} domain={view === 'share' ? [0, 100] : ['auto', 'auto']} tickFormatter={(value) => `${value}${view === 'share' ? '%' : 'g'}`} />
+            <Tooltip contentStyle={TOOLTIP} formatter={(value, name) => [value == null ? 'Missing' : `${Number(value).toFixed(1)}${view === 'share' ? '%' : ' g'}`, String(name)]} labelFormatter={(value) => formatBucket(String(value), grouping)} />
             <Line dataKey="protein" stroke="var(--color-protein)" strokeWidth={2.5} dot={{ r: 2 }} connectNulls={false} />
             <Line dataKey="carbs" stroke="var(--color-carbs)" strokeWidth={2.5} dot={{ r: 2 }} connectNulls={false} />
             <Line dataKey="fat" stroke="var(--color-fat)" strokeWidth={2.5} dot={{ r: 2 }} connectNulls={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <p className="text-sm" style={{ color: 'var(--color-tx2)' }}>Reference ranges are AMDR percentages of energy, so grams are not stacked together.</p>
+      <p className="text-sm" style={{ color: 'var(--color-tx2)' }}>{view === 'share' ? 'AMDR references are percentages of recorded macro energy.' : 'Values are averages per day containing that macro; missing days remain gaps.'}</p>
       {query.data?.unaccounted_items ? <DataWarning>{query.data.unaccounted_items} food item{query.data.unaccounted_items > 1 ? 's were' : ' was'} excluded because nutrition is unknown.</DataWarning> : null}
-      <ChartTable headers={['Period', 'Protein', 'Carbs', 'Fat']} rows={chart.map((point) => [formatBucket(point.bucket, grouping), `${point.protein}%`, `${point.carbs}%`, `${point.fat}%`])} />
+      <ChartTable headers={['Period', 'Protein', 'Carbs', 'Fat']} rows={chart.map((point, index) => [formatPeriod(series[index]), formatMacroValue(point.protein, view), formatMacroValue(point.carbs, view), formatMacroValue(point.fat, view)])} />
     </ReportPanel>
   )
 }
 
-function GoalPanel({ comparison }: {
-  comparison: ReturnType<typeof useQuery<GoalVsActual>>
+function GoalPanel({ summary, dateFrom, dateTo }: {
+  summary: ReturnType<typeof useQuery<GoalProgressSummary>>; dateFrom: string; dateTo: string
 }) {
-  const metric = findPlottableGoalMetric(comparison.data)
-  const target = comparison.data?.targets.find((item) => item.metric === metric)
-  const chart = metric ? (comparison.data?.series ?? []).flatMap((point) => {
-    const value = point[metric] as { actual?: number; target?: number } | undefined
-    return value && value.actual != null && value.target != null ? [{ date: String(point.date), actual: value.actual, target: value.target }] : []
-  }) : []
-  const summary = comparison.data?.summary
+  const [selectedGoalId, setSelectedGoalId] = useState('')
+  const [selectedMetric, setSelectedMetric] = useState('')
+  const goals = summary.data?.goals ?? []
+  const selected = selectGoal(goals, selectedGoalId)
+  const options = goalChartOptions(selected)
+  const option = options.find((item) => item.key === selectedMetric) ?? options[0]
+  const chart = option?.calendar.filter((point) => point.date >= dateFrom && point.date <= dateTo).map((point) => ({
+    ...point,
+    planned: point.target,
+    plannedLow: option.direction === 'around' ? point.target * 0.9 : null,
+    plannedHigh: option.direction === 'around' ? point.target * 1.1 : null,
+  })) ?? []
   return (
-    <ReportPanel title="Goal vs actual" description="Recorded results compared with your active personal target." loading={comparison.isPending} error={comparison.isError} onRetry={() => comparison.refetch()} empty={!comparison.data?.has_goal} emptyAction={<Link href="/goals/new" className="action-button">Add a goal</Link>}>
-      {target && chart.length > 0 && <>
-        <p className="mb-2 font-bold">{target.label ?? readableMetric(target.metric)}</p>
-        <div role="img" aria-label={`${target.label ?? readableMetric(target.metric)} actual compared with target`}>
+    <ReportPanel title="Goal vs actual" description="Choose any active goal. Each chart uses that goal's own dates, target, direction, and recorded source." loading={summary.isPending} error={summary.isError} onRetry={() => summary.refetch()} empty={!goals.length} emptyAction={<Link href="/goals/new" className="action-button">Add a goal</Link>}>
+      {selected && <>
+        <div className="flex gap-2 overflow-x-auto pb-2" role="tablist" aria-label="Active goals">
+          {goals.map((goal) => <button key={goal.goal_id} type="button" role="tab" aria-selected={goal.goal_id === selected.goal_id} onClick={() => setSelectedGoalId(goal.goal_id)} className="shrink-0 rounded-full border px-4 py-2 text-sm font-bold" style={{ borderColor: goal.goal_id === selected.goal_id ? 'var(--color-accent-strong)' : 'var(--color-line)', background: goal.goal_id === selected.goal_id ? 'var(--color-accent-soft)' : 'var(--color-surface)', color: goal.goal_id === selected.goal_id ? 'var(--color-accent-strong)' : 'var(--color-tx2)' }}>{goal.label}</button>)}
+        </div>
+        <h3 className="mt-2 text-xl font-bold">{selected.label}</h3>
+        {options.length > 1 && <div className="mt-3 flex gap-2 overflow-x-auto pb-2" role="tablist" aria-label={`${selected.label} metrics`}>
+          {options.map((item) => <button key={item.key} type="button" role="tab" aria-selected={item.key === option?.key} onClick={() => setSelectedMetric(item.key)} className="shrink-0 rounded-xl border px-3 py-2 text-sm font-semibold" style={{ borderColor: item.key === option?.key ? 'var(--color-accent-strong)' : 'var(--color-line)', background: item.key === option?.key ? 'var(--color-accent-soft)' : 'var(--color-surface)', color: item.key === option?.key ? 'var(--color-accent-strong)' : 'var(--color-tx2)' }}>{item.label}</button>)}
+        </div>}
+        <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+          <span className="rounded-full px-3 py-1" style={{ background: 'var(--color-surface-soft)' }}>{selected.cadence} cadence</span>
+          <span className="rounded-full px-3 py-1" style={{ background: 'var(--color-surface-soft)' }}>{directionLabel(option?.direction ?? selected.today.direction)}</span>
+          <span className="rounded-full px-3 py-1" style={{ background: 'var(--color-surface-soft)' }}>{selected.starts_on} to {selected.ends_on}</span>
+        </div>
+        <GoalPlanDetails goal={selected} />
+        {chart.length > 0 ? <>
+        <p className="mt-3 text-sm" style={{ color: 'var(--color-tx2)' }}>X-axis: date · Y-axis: {option?.label} ({option?.unit})</p>
+        <div className="mt-1" role="img" aria-label={`${option?.label} actual compared with planned target`}>
           <ResponsiveContainer width="100%" height={230}>
             <LineChart data={chart} margin={{ top: 10, right: 5, left: -12, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 4" stroke={GRID} vertical={false} />
-              <XAxis dataKey="date" {...AXIS} tickFormatter={(value) => shortBucket(String(value), 'day')} minTickGap={24} />
-              <YAxis {...AXIS} width={45} />
-              <Tooltip contentStyle={TOOLTIP} formatter={(value, name) => [`${Math.round(Number(value))} ${target.unit}`, String(name)]} />
+              <XAxis dataKey="date" {...AXIS} tickFormatter={(value) => shortBucket(String(value), 'day')} minTickGap={24} label={{ value: 'Date', position: 'insideBottomRight', offset: -2, fill: 'var(--color-tx2)' }} />
+              <YAxis {...AXIS} width={52} label={{ value: option ? `${option.label} (${option.unit})` : '', angle: -90, position: 'insideLeft', fill: 'var(--color-tx2)', fontSize: 11 }} />
+              <Tooltip contentStyle={TOOLTIP} formatter={(value, name) => [value == null ? 'Not recorded' : `${formatNumber(Number(value))} ${option?.unit}`, String(name)]} />
               <Line dataKey="actual" name="Actual" stroke="var(--color-accent)" strokeWidth={2.5} dot={{ r: 2 }} connectNulls={false} />
-              <Line dataKey="target" name="Target" stroke="var(--color-warn)" strokeDasharray="5 4" dot={false} connectNulls={false} />
+              <Line dataKey="planned" name={option?.trajectory ? 'Planned trajectory' : 'Daily target'} stroke="var(--color-warn)" strokeDasharray="5 4" dot={false} connectNulls={false} />
+              {option?.direction === 'around' && <Line dataKey="plannedLow" name="Lower target band" stroke="var(--color-warn)" strokeOpacity={0.45} strokeDasharray="2 5" dot={false} />}
+              {option?.direction === 'around' && <Line dataKey="plannedHigh" name="Upper target band" stroke="var(--color-warn)" strokeOpacity={0.45} strokeDasharray="2 5" dot={false} />}
             </LineChart>
           </ResponsiveContainer>
         </div>
-        <ChartTable headers={['Date', 'Actual', 'Target']} rows={chart.map((point) => [formatBucket(point.date, 'day'), `${formatNumber(point.actual)} ${target.unit}`, `${formatNumber(point.target)} ${target.unit}`])} />
+        <ChartTable headers={['Date', 'Actual', option?.trajectory ? 'Planned trajectory' : 'Daily target', 'Status']} rows={chart.map((point) => [formatBucket(point.date, 'day'), point.actual == null ? 'Not recorded' : `${formatNumber(point.actual)} ${option?.unit}`, `${formatNumber(point.planned)} ${option?.unit}`, progressStatusLabel(point.status)])} />
+        </> : <DataWarning>This goal does not overlap the selected report range.</DataWarning>}
+        <div className="mt-4 grid grid-cols-2 gap-2"><div className="rounded-2xl p-4" style={{ background: 'var(--color-surface-soft)' }}><p className="text-sm" style={{ color: 'var(--color-tx2)' }}>Period actual</p><p className="mt-1 text-xl font-bold tabular-nums">{option?.period.actual == null ? '—' : `${formatNumber(option.period.actual)} ${option.unit}`}</p></div><div className="rounded-2xl p-4" style={{ background: 'var(--color-surface-soft)' }}><p className="text-sm" style={{ color: 'var(--color-tx2)' }}>Target to date</p><p className="mt-1 text-xl font-bold tabular-nums">{option ? `${formatNumber(option.period.target_to_date)} ${option.unit}` : '—'}</p></div></div>
       </>}
-      {comparison.data?.has_goal && !chart.length && <DataWarning>This goal does not have a meal-based comparison chart for the selected period.</DataWarning>}
-      {summary && <div className="mt-4 grid grid-cols-2 gap-2"><div className="rounded-2xl p-4" style={{ background: 'var(--color-surface-soft)' }}><p className="text-sm" style={{ color: 'var(--color-tx2)' }}>Days with meals</p><p className="mt-1 text-xl font-bold tabular-nums">{summary.days_logged} / {summary.days_elapsed}</p></div><div className="rounded-2xl p-4" style={{ background: 'var(--color-surface-soft)' }}><p className="text-sm" style={{ color: 'var(--color-tx2)' }}>Logging coverage</p><p className="mt-1 text-xl font-bold tabular-nums">{Math.round(summary.adherence * 100)}%</p></div></div>}
     </ReportPanel>
   )
+}
+
+function GoalPlanDetails({ goal }: { goal: GoalProgressSummaryItem }) {
+  const derivation = goal.derivation
+  const rows: { label: string; value: string }[] = []
+  const add = (label: string, key: string, unit = '') => {
+    const value = derivation[key]
+    if (typeof value === 'number' && Number.isFinite(value)) rows.push({ label, value: `${formatNumber(value)}${unit ? ` ${unit}` : ''}` })
+    else if (typeof value === 'string' && value) rows.push({ label, value })
+  }
+  if (goal.kind === 'body_weight') {
+    add('Starting weight', 'weight_kg', 'kg')
+    add('Target weight', 'target_weight_kg', 'kg')
+    add('Target BMI', 'target_bmi')
+    add('Estimated BMR', 'bmr_kcal', 'kcal/day')
+    add('Estimated TDEE', 'tdee_kcal', 'kcal/day')
+    add('Requested rate', 'requested_rate_kg_per_week', 'kg/week')
+    add('Maximum safe rate', 'max_safe_rate_kg_per_week', 'kg/week')
+    add('Applied rate', 'applied_rate_kg_per_week', 'kg/week')
+    add('Applied intake', 'applied_intake_kcal', 'kcal/day')
+    add('Calorie floor', 'calorie_floor_kcal', 'kcal/day')
+    add('Projected date', 'achievable_end_date')
+  } else if (goal.kind === 'hydration') {
+    add('Profile water reference', 'estimated_target_ml', 'ml/day')
+    add('Applied water target', 'applied_target_ml', 'ml/day')
+    add('Weight used', 'weight_kg', 'kg')
+  } else if (goal.metric === 'protein_g') {
+    add('Weight used', 'weight_kg', 'kg')
+    add('Protein baseline', 'protein_floor_g', 'g/day')
+    add('Requested protein', 'requested_protein_g', 'g/day')
+    add('Applied protein', 'applied_protein_g', 'g/day')
+  } else if (goal.metric === 'calories_kcal') {
+    add('Requested calories', 'requested_intake_kcal', 'kcal/day')
+    add('Applied calories', 'applied_intake_kcal', 'kcal/day')
+    add('Calorie floor', 'calorie_floor_kcal', 'kcal/day')
+  }
+  if (!rows.length) return null
+  return <details className="mt-3 rounded-2xl border p-3" style={{ borderColor: 'var(--color-line)', background: 'var(--color-surface-soft)' }}>
+    <summary className="cursor-pointer font-bold">How this plan was calculated</summary>
+    <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-3">{rows.map((row) => <div key={row.label}><p className="text-xs" style={{ color: 'var(--color-tx2)' }}>{row.label}</p><p className="font-semibold tabular-nums">{row.value}</p></div>)}</div>
+  </details>
 }
 
 function MealPatternPanel({ query }: { query: ReturnType<typeof useQuery<MealPatterns>> }) {
@@ -297,14 +423,14 @@ function NutrientFocusPanel({ query, micros, patterns, grouping }: {
   query: ReturnType<typeof useQuery<NutrientSeries>>; micros?: Micros; patterns?: MealPatterns; grouping: ReportGrouping
 }) {
   const [selected, setSelected] = useState<'fiber_g' | 'sodium_mg'>('fiber_g')
-  const series = query.data?.series.map((point) => ({ bucket: point.bucket, value: point.daily_averages[selected] ?? null, coverageDays: point.coverage_days[selected] ?? 0 })) ?? []
+  const series = query.data?.series.map((point) => ({ ...point, value: point.daily_averages[selected] ?? null, coverageDays: point.coverage_days[selected] ?? 0 })) ?? []
   const coveredDays = series.reduce((sum, point) => sum + point.coverageDays, 0)
   const mean = coveredDays ? series.reduce((sum, point) => sum + (point.value ?? 0) * point.coverageDays, 0) / coveredDays : null
   const reference = micros?.panel.find((row) => row.nutrient === selected)
   const coverage = patterns?.nutrient_coverage.find((row) => row.nutrient === selected)
   const ceiling = selected === 'sodium_mg'
   return (
-    <ReportPanel title="Fiber and sodium" description="Focused trends for a minimum-reference nutrient and a reference-limit nutrient, with missing values kept separate from zero." loading={query.isPending} error={query.isError} onRetry={() => query.refetch()} empty={!query.data?.series.length}>
+    <ReportPanel title="Fiber and sodium" description="Focused trends for a minimum-reference nutrient and a reference-limit nutrient, with missing values kept separate from zero." loading={query.isPending} error={query.isError} onRetry={() => query.refetch()} empty={!series.some((point) => point.value != null)}>
       <div className="mb-4 grid grid-cols-2 rounded-2xl border p-1" style={{ borderColor: 'var(--color-line)', background: 'var(--color-surface-soft)' }}>
         <button onClick={() => setSelected('fiber_g')} aria-pressed={selected === 'fiber_g'} className="rounded-xl px-3 py-2 font-semibold" style={{ background: selected === 'fiber_g' ? 'var(--color-surface)' : 'transparent', color: selected === 'fiber_g' ? 'var(--color-accent-strong)' : 'var(--color-tx2)' }}>Fiber</button>
         <button onClick={() => setSelected('sodium_mg')} aria-pressed={selected === 'sodium_mg'} className="rounded-xl px-3 py-2 font-semibold" style={{ background: selected === 'sodium_mg' ? 'var(--color-surface)' : 'transparent', color: selected === 'sodium_mg' ? 'var(--color-accent-strong)' : 'var(--color-tx2)' }}>Sodium</button>
@@ -324,38 +450,38 @@ function NutrientFocusPanel({ query, micros, patterns, grouping }: {
       </div>
       <p className="text-sm" style={{ color: 'var(--color-tx2)' }}>{coverage ? `${coverage.items_with_value} of ${coverage.total_items} food items (${Math.round(coverage.coverage_pct)}%) included a ${selected === 'fiber_g' ? 'fiber' : 'sodium'} value.` : 'Item-level coverage is unavailable.'}</p>
       <DataWarning>{ceiling ? 'Recorded sodium may not include salt added during cooking or at the table. Values above the line are above the displayed reference, not a diagnosis.' : 'A value below the line describes this food log only and does not diagnose a deficiency.'}</DataWarning>
-      <ChartTable headers={['Period', `${readableMetric(selected)} per covered day`, 'Days with values']} rows={series.map((point) => [formatBucket(point.bucket, grouping), point.value == null ? 'Missing' : `${formatNumber(point.value)} ${metricUnit(selected)}`, String(point.coverageDays)])} />
+      <ChartTable headers={['Period', `${readableMetric(selected)} per covered day`, 'Days with values']} rows={series.map((point) => [formatPeriod(point), point.value == null ? 'Missing' : `${formatNumber(point.value)} ${metricUnit(selected)}`, `${point.coverageDays}/${point.calendar_days}`])} />
     </ReportPanel>
   )
 }
 
 function MicronutrientPanel({ query }: { query: ReturnType<typeof useQuery<Micros>> }) {
   const data = query.data
-  const scale = Math.max(150, ...(data?.panel.map((row) => row.pct_of_rda) ?? [150]))
+  const recorded = data?.panel.filter((row) => row.pct_of_rda != null) ?? []
+  const missing = (data?.panel.length ?? 0) - recorded.length
+  const scale = Math.max(150, ...recorded.map((row) => row.pct_of_rda ?? 0))
   return (
-    <ReportPanel title="Micronutrients" description={data ? `Average across ${data.days} calendar days; ${data.logged_days} had nutrition-bearing meals · ${data.basis}` : 'Recorded vitamins and minerals compared with reference values.'} loading={query.isPending} error={query.isError} onRetry={() => query.refetch()} empty={!data?.panel.length}>
+    <ReportPanel title="Vitamins and minerals" description={data ? `Average per day with a recorded value for each nutrient; ${data.logged_days} of ${data.days} calendar days had nutrition-bearing meals · ${data.basis}` : 'Recorded vitamins and minerals compared with reference values.'} loading={query.isPending} error={query.isError} onRetry={() => query.refetch()} empty={!recorded.length} emptyText="No vitamin or mineral values were recorded in this period.">
       <p className="mb-3 font-bold">Review first</p>
       <div>{data?.watchlist.map((row) => <MicroReference key={row.nutrient} row={row} scale={scale} />)}</div>
-      <DataWarning>Food logs cannot diagnose a deficiency. Missing meal nutrient values can lower these recorded averages.</DataWarning>
+      <DataWarning>Food logs cannot diagnose a deficiency. {missing} vitamin or mineral values were not recorded and are not shown as zero.</DataWarning>
       {data?.unaccounted_items ? <DataWarning>{data.unaccounted_items} food item{data.unaccounted_items > 1 ? 's were' : ' was'} excluded because nutrition is unknown.</DataWarning> : null}
       <details className="mt-4 border-t pt-2" style={{ borderColor: 'var(--color-line)' }}>
-        <summary className="cursor-pointer py-3 font-bold" style={{ color: 'var(--color-accent-strong)' }}>View all 18 nutrients</summary>
-        <div className="mt-2">{data?.panel.map((row) => <MicroReference key={row.nutrient} row={row} scale={scale} />)}</div>
+        <summary className="cursor-pointer py-3 font-bold" style={{ color: 'var(--color-accent-strong)' }}>View all {recorded.length} recorded vitamins and minerals</summary>
+        <div className="mt-2">{recorded.map((row) => <MicroReference key={row.nutrient} row={row} scale={scale} />)}</div>
       </details>
     </ReportPanel>
   )
 }
 
-function WaterPanel({ query, goals, grouping }: {
-  query: ReturnType<typeof useQuery<HydrationReport>>
-  goals?: GoalProgressSummary; grouping: ReportGrouping
+function WaterPanel({ query, grouping }: {
+  query: ReturnType<typeof useQuery<HydrationReport>>; grouping: ReportGrouping
 }) {
   const series = query.data?.series.map((point) => ({ ...point, value: grouping === 'day' ? point.volume_ml : point.daily_average_ml })) ?? []
-  const target = goals?.goals.find((goal) => goal.kind === 'hydration')?.today.target
   const totalLoggedDays = series.reduce((sum, point) => sum + point.logged_days, 0)
-  const mean = totalLoggedDays ? series.reduce((sum, point) => sum + point.volume_ml, 0) / totalLoggedDays : null
+  const mean = totalLoggedDays ? series.reduce((sum, point) => sum + (point.volume_ml ?? 0), 0) / totalLoggedDays : null
   return (
-    <ReportPanel title="Water recorded" description={`All water entries in the selected range, grouped by ${grouping}; food moisture and other drinks are not included.`} loading={query.isPending} error={query.isError} onRetry={() => query.refetch()} empty={!series.length}>
+    <ReportPanel title="Water recorded" description={`All water entries in the selected rolling range, grouped by ${grouping}; food moisture and other drinks are not included.`} loading={query.isPending} error={query.isError} onRetry={() => query.refetch()} empty={!series.some((point) => point.volume_ml != null)}>
       <MetricLine value={mean == null ? '—' : `${(mean / 1000).toFixed(1)} L`} label={`average per water-log day across ${query.data?.logged_days ?? 0} recorded days`} />
       <div role="img" aria-label={`Water recorded chart with ${series.length} periods`}>
         <ResponsiveContainer width="100%" height={220}>
@@ -365,11 +491,10 @@ function WaterPanel({ query, goals, grouping }: {
             <YAxis {...AXIS} width={45} tickFormatter={(value) => `${Number(value) / 1000}L`} />
             <Tooltip contentStyle={TOOLTIP} formatter={(value) => [`${(Number(value) / 1000).toFixed(2)} L`, grouping === 'day' ? 'Recorded' : 'Average per logged day']} />
             <Bar dataKey="value" fill="var(--color-protein)" radius={[5, 5, 0, 0]} maxBarSize={28} />
-            {target && grouping === 'day' && <ReferenceLine y={target} stroke="var(--color-warn)" strokeDasharray="5 4" />}
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <ChartTable headers={['Period', 'Total recorded', 'Average per logged day', 'Entries']} rows={series.map((point) => [formatBucket(point.bucket, grouping), `${(point.volume_ml / 1000).toFixed(2)} L`, `${(point.daily_average_ml / 1000).toFixed(2)} L`, String(point.log_count)])} />
+      <ChartTable headers={['Period', 'Total recorded', 'Average per logged day', 'Entries', 'Coverage']} rows={series.map((point) => [formatPeriod(point), point.volume_ml == null ? 'Missing' : `${(point.volume_ml / 1000).toFixed(2)} L`, point.daily_average_ml == null ? 'Missing' : `${(point.daily_average_ml / 1000).toFixed(2)} L`, String(point.log_count), `${point.logged_days}/${point.calendar_days} days`])} />
       <DataWarning>These values describe water entered in the app, not hydration status or total water intake.</DataWarning>
     </ReportPanel>
   )
@@ -460,13 +585,14 @@ function SourceList({ title, rows, label }: {
 }
 
 function MicroReference({ row, scale }: { row: MicroRow; scale: number }) {
+  if (row.pct_of_rda == null || row.actual_per_day == null) return null
   const ceiling = row.direction === 'at_most'
   const width = Math.min(100, (row.pct_of_rda / scale) * 100)
   const marker = (100 / scale) * 100
   return (
     <div className="mb-4">
-      <div className="flex items-end justify-between gap-3"><div><p className="font-semibold capitalize">{readableMetric(row.nutrient)}</p><p className="text-sm tabular-nums" style={{ color: 'var(--color-tx2)' }}>{formatNumber(row.actual_per_day)} / {formatNumber(row.rda_per_day)} {metricUnit(row.nutrient)} per day</p></div><span className="shrink-0 text-sm font-bold">{Math.round(row.pct_of_rda)}% {ceiling ? 'of limit' : 'of reference'}</span></div>
-      <div className="relative mt-2 h-2 overflow-hidden rounded-full" style={{ background: 'var(--color-line)' }}><div className="h-full rounded-full" style={{ width: `${width}%`, background: row.on_track ? 'var(--color-accent)' : ceiling ? 'var(--color-danger)' : 'var(--color-warn)' }} /><span className="absolute inset-y-0 w-0.5" style={{ left: `${marker}%`, background: 'var(--color-tx)' }} /></div>
+      <div className="flex items-end justify-between gap-3"><div><p className="font-semibold capitalize">{readableMetric(row.nutrient)}</p><p className="text-sm tabular-nums" style={{ color: 'var(--color-tx2)' }}>{formatNumber(row.actual_per_day)} / {formatNumber(row.rda_per_day)} {metricUnit(row.nutrient)} per covered day · {row.coverage_days} days</p></div><span className="shrink-0 text-sm font-bold">{Math.round(row.pct_of_rda)}% {ceiling ? 'of limit' : 'of reference'}</span></div>
+      <div className="relative mt-2 h-2 overflow-hidden rounded-full" style={{ background: 'var(--color-line)' }}><div className="h-full rounded-full" style={{ width: `${width}%`, background: row.on_track == null ? 'var(--color-tx2)' : row.on_track ? 'var(--color-accent)' : ceiling ? 'var(--color-danger)' : 'var(--color-warn)' }} /><span className="absolute inset-y-0 w-0.5" style={{ left: `${marker}%`, background: 'var(--color-tx)' }} /></div>
     </div>
   )
 }
@@ -495,14 +621,16 @@ function buildInsights(
   weights: { measured_on: string; weight_kg: number }[] = []
 ) {
   const insights: { title: string; detail: string }[] = []
-  const calorieValues = trend?.series.map((point) => point.calories_kcal) ?? []
-  const previousCalories = previousTrend?.series.map((point) => point.calories_kcal) ?? []
-  const currentMean = average(calorieValues)
-  const previousMean = average(previousCalories)
+  const calorieValues = trend?.series.flatMap((point) => point.calories_kcal == null ? [] : [point.calories_kcal]) ?? []
+  const previousCalories = previousTrend?.series.flatMap((point) => point.calories_kcal == null ? [] : [point.calories_kcal]) ?? []
+  const currentCoveredDays = trend?.series.reduce((sum, point) => sum + point.recorded_days, 0) ?? 0
+  const previousCoveredDays = previousTrend?.series.reduce((sum, point) => sum + point.recorded_days, 0) ?? 0
+  const currentMean = currentCoveredDays ? calorieValues.reduce((sum, value) => sum + value, 0) / currentCoveredDays : null
+  const previousMean = previousCoveredDays ? previousCalories.reduce((sum, value) => sum + value, 0) / previousCoveredDays : null
   if (calorieValues.length >= 3 && previousCalories.length >= 3 && currentMean != null && previousMean != null && previousMean > 0) {
     const change = (currentMean - previousMean) / previousMean * 100
-    insights.push({ title: 'Recorded energy', detail: `Averaged ${Math.abs(Math.round(change))}% ${change >= 0 ? 'higher' : 'lower'} than the previous equal period (${calorieValues.length} vs ${previousCalories.length} recorded points).` })
-  } else if (calorieValues.length) insights.push({ title: 'Recorded energy', detail: `${calorieValues.length} periods have calorie data. Both equal periods need at least 3 points for a comparison.` })
+    insights.push({ title: 'Recorded energy', detail: `Averaged ${Math.abs(Math.round(change))}% ${change >= 0 ? 'higher' : 'lower'} per covered day than the previous equal period (${currentCoveredDays} vs ${previousCoveredDays} covered days).` })
+  } else if (calorieValues.length) insights.push({ title: 'Recorded energy', detail: `${currentCoveredDays} days have calorie data. Both equal periods need at least 3 recorded points for a comparison.` })
 
   const shares = macroAverages(macros?.series ?? [])
   const previousShares = macroAverages(previousMacros?.series ?? [])
@@ -529,9 +657,10 @@ function buildInsights(
 }
 
 function macroAverages(series: MacroSeriesPoint[]) {
-  const proteinEnergy = series.reduce((sum, point) => sum + point.protein_g * 4, 0)
-  const carbEnergy = series.reduce((sum, point) => sum + point.carbs_g * 4, 0)
-  const fatEnergy = series.reduce((sum, point) => sum + point.fat_g * 9, 0)
+  const complete = series.filter((point) => point.protein_g != null && point.carbs_g != null && point.fat_g != null)
+  const proteinEnergy = complete.reduce((sum, point) => sum + Number(point.protein_g) * 4, 0)
+  const carbEnergy = complete.reduce((sum, point) => sum + Number(point.carbs_g) * 4, 0)
+  const fatEnergy = complete.reduce((sum, point) => sum + Number(point.fat_g) * 9, 0)
   const total = proteinEnergy + carbEnergy + fatEnergy
   return {
     protein: total ? proteinEnergy / total * 100 : null,
@@ -540,15 +669,63 @@ function macroAverages(series: MacroSeriesPoint[]) {
   }
 }
 
-function findCalorieTarget(data?: GoalVsActual) {
-  return data?.targets.find((target) => target.metric === 'calories_kcal')?.value
+function formatMacroValue(value: number | null, view: 'grams' | 'share') {
+  return value == null ? 'Missing' : `${formatNumber(value)}${view === 'share' ? '%' : ' g'}`
 }
 
-function findPlottableGoalMetric(data?: GoalVsActual) {
-  return data?.targets.find((target) => data.series.some((point) => {
-    const value = point[target.metric]
-    return typeof value === 'object' && value !== null && 'actual' in value
-  }))?.metric
+function formatStat(value: number | null, unit: string) {
+  return value == null ? '—' : `${Math.round(value).toLocaleString()} ${unit}`
+}
+
+function directionLabel(direction: string | null) {
+  return direction === 'at_least' ? 'At least target' : direction === 'at_most' ? 'At most target' : direction === 'around' ? 'Around target' : 'Target direction unavailable'
+}
+
+function progressStatusLabel(status: string) {
+  return ({ met: 'Met', below: 'Below', above: 'Above', no_data: 'Not recorded', in_progress: 'In progress', future: 'Future' } as Record<string, string>)[status] ?? status
+}
+
+type GoalChartOption = {
+  key: string
+  label: string
+  unit: string
+  direction: string | null
+  trajectory: boolean
+  calendar: GoalProgressSummaryItem['calendar']
+  period: GoalProgressSummaryItem['period'] | GoalMetricProgress['period']
+}
+
+function goalChartOptions(goal?: GoalProgressSummaryItem): GoalChartOption[] {
+  if (!goal) return []
+  const metricOptions = goal.metrics.map((metric) => ({
+    key: metric.metric,
+    label: metric.label,
+    unit: metric.unit,
+    direction: metric.direction,
+    trajectory: false,
+    calendar: metric.calendar,
+    period: metric.period,
+  }))
+  if (goal.kind !== 'body_weight') {
+    return metricOptions.length ? metricOptions : [{
+      key: goal.metric ?? goal.kind,
+      label: goal.label,
+      unit: goal.today.unit,
+      direction: goal.today.direction,
+      trajectory: false,
+      calendar: goal.calendar,
+      period: goal.period,
+    }]
+  }
+  return [{
+    key: 'weight_kg',
+    label: 'Weight',
+    unit: 'kg',
+    direction: goal.today.direction,
+    trajectory: true,
+    calendar: goal.calendar,
+    period: goal.period,
+  }, ...metricOptions]
 }
 
 function formatRange(range?: number[]) { return range ? `${range[0]}–${range[1]}% reference` : 'No reference' }
@@ -573,8 +750,13 @@ function shortBucket(value: string, grouping: ReportGrouping) {
   return date.toLocaleDateString(undefined, grouping === 'month' ? { month: 'short' } : { day: 'numeric', month: 'short' })
 }
 
-function formatBucket(value: string, grouping: ReportGrouping) {
+function formatBucket(value: string, _grouping: ReportGrouping) {
   const date = new Date(`${value}T12:00:00`)
   const formatted = date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
-  return grouping === 'week' ? `Week of ${formatted}` : grouping === 'month' ? date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : formatted
+  return formatted
+}
+
+function formatPeriod(point: { period_start: string; period_end: string }) {
+  const start = formatBucket(point.period_start, 'day')
+  return point.period_start === point.period_end ? start : `${start} to ${formatBucket(point.period_end, 'day')}`
 }

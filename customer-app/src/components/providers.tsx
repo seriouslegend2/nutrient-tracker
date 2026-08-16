@@ -5,6 +5,7 @@ import { useState } from 'react'
 
 import { ApiRequestError } from '@/lib/api-client'
 import { AuthenticatedGate } from '@/components/authenticated-gate'
+import { MediaAnalysisProvider } from '@/components/media-analysis-provider'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -28,7 +29,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   )
   return (
     <QueryClientProvider client={client}>
-      <AuthenticatedGate>{children}</AuthenticatedGate>
+      <AuthenticatedGate><MediaAnalysisProvider>{children}</MediaAnalysisProvider></AuthenticatedGate>
     </QueryClientProvider>
   )
 }

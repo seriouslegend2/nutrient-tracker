@@ -330,6 +330,7 @@ export type GoalMetricProgress = {
     days_elapsed: number
     total_days: number
   }
+  calendar: { date: string; status: GoalProgressStatus; actual: number | null; target: number }[]
 }
 
 export type GoalProgressSummaryItem = {
@@ -339,6 +340,7 @@ export type GoalProgressSummaryItem = {
   cadence: GoalCadence
   is_primary: boolean
   label: string
+  derivation: Record<string, unknown>
   starts_on: string
   ends_on: string
   today: GoalProgressValue
@@ -389,28 +391,52 @@ export type GoalProgress = {
   }[]
 }
 
-export type Trend = {
+type ReportRange = {
+  date_from: string
+  date_to: string
+  calendar_days: number
   group_by: string
-  series: { bucket: string; calories_kcal: number; rolling_mean: number }[]
+}
+
+type ReportPeriod = {
+  bucket: string
+  period_start: string
+  period_end: string
+  calendar_days: number
+  is_partial: boolean
+}
+
+export type Trend = ReportRange & {
+  series: (ReportPeriod & {
+    calories_kcal: number | null
+    daily_average_kcal: number | null
+    rolling_mean: number | null
+    recorded_days: number
+    items_with_value: number
+    total_items: number
+    coverage_status: 'missing' | 'partial' | 'complete'
+  })[]
   unaccounted_items: number
 }
 
-export type Macros = {
-  group_by: string
+export type Macros = ReportRange & {
   series: MacroSeriesPoint[]
   logged_days: number
+  coverage_days: Record<string, number>
   unaccounted_items: number
   amdr_reference: Record<string, number[]>
 }
 
-export type MacroSeriesPoint = {
-  bucket: string
-  calories_kcal: number
-  protein_g: number
-  carbs_g: number
-  fat_g: number
-  fiber_g: number
-  pct_of_energy: { protein: number; carbs: number; fat: number }
+export type MacroSeriesPoint = ReportPeriod & {
+  calories_kcal: number | null
+  protein_g: number | null
+  carbs_g: number | null
+  fat_g: number | null
+  fiber_g: number | null
+  pct_of_energy: { protein: number | null; carbs: number | null; fat: number | null }
+  coverage_items: Record<string, number>
+  coverage_days: Record<string, number>
+  mean_per_covered_day: Record<string, number | null>
 }
 
 export type Micros = {
@@ -425,11 +451,13 @@ export type Micros = {
 
 export type MicroRow = {
   nutrient: string
-  actual_per_day: number
+  actual_per_day: number | null
   rda_per_day: number
-  pct_of_rda: number
+  pct_of_rda: number | null
   direction: string
-  on_track: boolean
+  on_track: boolean | null
+  coverage_days: number
+  items_with_value: number
 }
 
 export type GoalVsActual = {
@@ -469,30 +497,26 @@ export type MealPatterns = {
 
 export type SourceBreakdown = { source: string; item_count: number; share_pct: number }
 
-export type NutrientSeries = {
-  group_by: string
+export type NutrientSeries = ReportRange & {
   nutrients: string[]
   logged_days: number
   unaccounted_items: number
-  series: {
-    bucket: string
+  series: (ReportPeriod & {
     totals: Record<string, number>
     daily_averages: Record<string, number>
     coverage_items: Record<string, number>
     coverage_days: Record<string, number>
-  }[]
+  })[]
 }
 
-export type HydrationReport = {
-  group_by: string
+export type HydrationReport = ReportRange & {
   logged_days: number
-  series: {
-    bucket: string
-    volume_ml: number
+  series: (ReportPeriod & {
+    volume_ml: number | null
     log_count: number
     logged_days: number
-    daily_average_ml: number
-  }[]
+    daily_average_ml: number | null
+  })[]
 }
 
 export type WaterLog = { logged_on: string; volume_ml: number }
@@ -580,6 +604,7 @@ export type MealDraftConfirmResponse = {
 export type Message = {
   id: string
   thread_id: string
+  correlation_id: string
   direction: string
   msg_type: string
   msg_text: string | null

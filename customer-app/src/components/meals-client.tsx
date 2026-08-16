@@ -7,7 +7,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { BottomNav } from '@/components/nav'
 import { NutrientSpine } from '@/components/nutrient-spine'
 import { api, type Day, type Dish, type Meal } from '@/lib/api-client'
-import { inclusiveDateRange, isISODate, localDateISO, shiftISODate, startOfWeekISO } from '@/lib/date'
+import { inclusiveDateRange, isISODate, localDateISO, rollingDateWindow } from '@/lib/date'
 import { formatNutrientValue, otherNutrients, primaryNutrients, scaleNutrients } from '@/lib/nutrients'
 
 const SLOTS = ['breakfast', 'brunch', 'lunch', 'snacks', 'dinner', 'misc'] as const
@@ -25,10 +25,10 @@ export function MealsClient() {
   const requestedDate = params.get('date')
   const requestedSlot = params.get('slot')
   const initialDate = isISODate(requestedDate) ? requestedDate : localDateISO()
-  const initialRangeStart = startOfWeekISO(initialDate)
+  const initialRange = rollingDateWindow(7, initialDate)
   const [selected, setSelected] = useState(initialDate)
-  const [rangeStart, setRangeStart] = useState(initialRangeStart)
-  const [rangeEnd, setRangeEnd] = useState(shiftISODate(initialRangeStart, 6))
+  const [rangeStart, setRangeStart] = useState(initialRange.dateFrom)
+  const [rangeEnd, setRangeEnd] = useState(initialRange.dateTo)
   const [slotFilter, setSlotFilter] = useState<MealSlot[]>([])
   const [adding, setAdding] = useState<{ date: string; slot: string } | null>(
     requestedSlot && SLOTS.some((slot) => slot === requestedSlot)
@@ -37,7 +37,7 @@ export function MealsClient() {
   )
   const activeDay = useRef<HTMLButtonElement>(null)
   const daySections = useRef(new Map<string, HTMLElement>())
-  const pendingJump = useRef(false)
+  const pendingJump = useRef(true)
   const queryClient = useQueryClient()
   const range = useMemo(() => inclusiveDateRange(rangeStart, rangeEnd), [rangeEnd, rangeStart])
   const dayQueries = useQueries({
@@ -78,11 +78,18 @@ export function MealsClient() {
   const showToday = () => {
     const today = localDateISO()
     if (today < rangeStart || today > rangeEnd) {
-      const start = startOfWeekISO(today)
-      setRangeStart(start)
-      setRangeEnd(shiftISODate(start, 6))
+      const window = rollingDateWindow(range.length || 7, today)
+      setRangeStart(window.dateFrom)
+      setRangeEnd(window.dateTo)
     }
     selectDate(today, true)
+  }
+  const applyPreset = (days: number) => {
+    const today = localDateISO()
+    const window = rollingDateWindow(days, today)
+    setRangeStart(window.dateFrom)
+    setRangeEnd(window.dateTo)
+    selectDate(today)
   }
   const toggleSlot = (slot: MealSlot) => {
     setSlotFilter((current) => current.includes(slot)
@@ -114,7 +121,7 @@ export function MealsClient() {
           </label>
           <div className="flex min-h-11 items-center gap-2">
             {[5, 7, 14].map((days) => <button key={days} type="button"
-              onClick={() => applyRange(rangeStart, shiftISODate(rangeStart, days - 1))}
+              onClick={() => applyPreset(days)}
               className={range.length === days ? 'action-button' : 'action-button-secondary'}>{days} days</button>)}
           </div>
         </div>

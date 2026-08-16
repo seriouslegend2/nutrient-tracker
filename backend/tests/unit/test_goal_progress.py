@@ -310,6 +310,26 @@ def test_body_weight_calorie_target_has_daily_and_full_period_bars() -> None:
     assert result["period"]["target_to_date"] == 4000
     assert result["period"]["target"] == 6000
     assert result["period"]["progress_pct"] == pytest.approx(61.7, abs=0.1)
+    assert result["calendar"] == [
+        {
+            "date": "2026-01-01",
+            "status": "met",
+            "actual": 1800,
+            "target": 2000.0,
+        },
+        {
+            "date": "2026-01-02",
+            "status": "in_progress",
+            "actual": 1900,
+            "target": 2000.0,
+        },
+        {
+            "date": "2026-01-03",
+            "status": "future",
+            "actual": None,
+            "target": 2000.0,
+        },
+    ]
 
 
 @pytest.mark.unit

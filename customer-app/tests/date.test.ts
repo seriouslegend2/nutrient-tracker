@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { inclusiveDateRange, shiftISODate, startOfWeekISO } from '../src/lib/date'
+import { inclusiveDateRange, rollingDateWindow, shiftISODate, startOfWeekISO } from '../src/lib/date'
 
 describe('meal date ranges', () => {
   it('builds every date in an inclusive custom range', () => {
@@ -17,5 +17,16 @@ describe('meal date ranges', () => {
 
   it('rejects a reversed range', () => {
     expect(inclusiveDateRange('2026-08-16', '2026-08-12')).toEqual([])
+  })
+
+  it.each([
+    [5, '2026-08-13'],
+    [7, '2026-08-11'],
+    [14, '2026-08-04'],
+  ])('builds a %i-day rolling meal window ending today', (days, dateFrom) => {
+    const window = rollingDateWindow(days, '2026-08-17')
+
+    expect(window).toEqual({ dateFrom, dateTo: '2026-08-17' })
+    expect(inclusiveDateRange(window.dateFrom, window.dateTo)).toHaveLength(days)
   })
 })

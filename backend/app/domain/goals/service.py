@@ -464,7 +464,13 @@ async def progress_summary(user_id: str, as_of: date) -> dict[str, Any]:
                 .execute()
             )
             meals = meals_result.data or []
-        if any(goal["kind"] == "hydration" for goal in goals):
+        if any(
+            any(
+                target.get("metric") == "water_ml"
+                for target in (goal.get("daily_targets") or {}).get("targets") or []
+            )
+            for goal in goals
+        ):
             water_result = (
                 await sb.table("water_logs")
                 .select("logged_on,volume_ml")
@@ -515,8 +521,6 @@ async def progress_summary(user_id: str, as_of: date) -> dict[str, Any]:
         metric_summaries: list[dict[str, Any]] = []
 
         for target_row in target_rows:
-            if kind == "body_weight" and target_row.get("metric") == "water_ml":
-                continue
             metric_actuals: dict[date, float | None] = {}
             metric = target_row.get("metric")
             scope = target_row.get("scope") or "total"

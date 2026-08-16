@@ -9,6 +9,7 @@ unaccounted" is honest, silently under-counting is not.
 
 from __future__ import annotations
 
+import calendar
 from collections import defaultdict
 from datetime import date, timedelta
 from statistics import median
@@ -34,9 +35,8 @@ RDA: dict[str, dict[str, float]] = {
     "magnesium_mg": {"male": 440, "female": 370},
     "potassium_mg": {"male": 3510, "female": 3510},
     "sodium_mg": {"male": 2000, "female": 2000},  # a CEILING, not a target
-    "fiber_g": {"male": 30, "female": 30},
-    "thiamine_mg": {"male": 1.8, "female": 1.7},
-    "riboflavin_mg": {"male": 2.5, "female": 2.4},
+    "vitamin_b1_mg": {"male": 1.8, "female": 1.7},
+    "vitamin_b2_mg": {"male": 2.5, "female": 2.4},
     "vitamin_b6_mg": {"male": 2.4, "female": 1.9},
     "selenium_ug": {"male": 40, "female": 40},
     "vitamin_e_mg": {"male": 10, "female": 10},
@@ -75,12 +75,63 @@ async def _water_rows(user_id: str, date_from: date, date_to: date) -> list[dict
     return res.data or []
 
 
-def _bucket(day: date, group_by: str) -> str:
-    if group_by == "week":
-        return (day - timedelta(days=day.weekday())).isoformat()
-    if group_by == "month":
-        return day.replace(day=1).isoformat()
-    return day.isoformat()
+def _add_months(value: date, months: int) -> date:
+    index = value.year * 12 + value.month - 1 + months
+    year, month_index = divmod(index, 12)
+    month = month_index + 1
+    return date(year, month, min(value.day, calendar.monthrange(year, month)[1]))
+
+
+def _periods(date_from: date, date_to: date, group_by: str) -> list[dict[str, Any]]:
+    """Materialize every rolling period in the inclusive requested range."""
+    periods: list[dict[str, Any]] = []
+    cursor = date_from
+    index = 0
+    while cursor <= date_to:
+        if group_by == "day":
+            end = cursor
+        elif group_by == "week":
+            end = min(cursor + timedelta(days=6), date_to)
+        else:
+            next_start = _add_months(date_from, index + 1)
+            end = min(next_start - timedelta(days=1), date_to)
+        periods.append(
+            {
+                "bucket": cursor.isoformat(),
+                "period_start": cursor.isoformat(),
+                "period_end": end.isoformat(),
+                "calendar_days": (end - cursor).days + 1,
+                "is_partial": (
+                    group_by == "week" and (end - cursor).days < 6
+                )
+                or (
+                    group_by == "month" and end < _add_months(date_from, index + 1) - timedelta(days=1)
+                ),
+            }
+        )
+        cursor = end + timedelta(days=1)
+        index += 1
+    return periods
+
+
+def _period_lookup(periods: list[dict[str, Any]]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for period in periods:
+        cursor = date.fromisoformat(period["period_start"])
+        end = date.fromisoformat(period["period_end"])
+        while cursor <= end:
+            lookup[cursor.isoformat()] = str(period["bucket"])
+            cursor += timedelta(days=1)
+    return lookup
+
+
+def _range_meta(date_from: date, date_to: date, group_by: str) -> dict[str, Any]:
+    return {
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "calendar_days": (date_to - date_from).days + 1,
+        "group_by": group_by,
+    }
 
 
 async def trend(
@@ -88,25 +139,62 @@ async def trend(
 ) -> dict[str, Any]:
     """Calorie intake over time, with a 7-point rolling mean."""
     rows = await _rows(user_id, date_from, date_to)
+    periods = _periods(date_from, date_to, group_by)
+    lookup = _period_lookup(periods)
     buckets: dict[str, float] = defaultdict(float)
+    recorded_days: dict[str, set[str]] = defaultdict(set)
+    total_items: dict[str, int] = defaultdict(int)
+    items_with_value: dict[str, int] = defaultdict(int)
     unaccounted = 0
     for row in rows:
+        meal_date = str(row["meal_date"])
+        bucket = lookup[meal_date]
+        total_items[bucket] += 1
         nutrients = row.get("nutrients") or {}
-        if not nutrients:
+        if "calories_kcal" not in nutrients:
             unaccounted += 1
             continue
-        day = date.fromisoformat(row["meal_date"])
-        buckets[_bucket(day, group_by)] += float(nutrients.get("calories_kcal", 0) or 0)
+        buckets[bucket] += float(nutrients["calories_kcal"])
+        recorded_days[bucket].add(meal_date)
+        items_with_value[bucket] += 1
 
-    series = [{"bucket": k, "calories_kcal": round(v, 1)} for k, v in sorted(buckets.items())]
+    series = []
+    for period in periods:
+        bucket = str(period["bucket"])
+        covered = len(recorded_days[bucket])
+        value = round(buckets[bucket], 1) if items_with_value[bucket] else None
+        series.append(
+            {
+                **period,
+                "calories_kcal": value,
+                "daily_average_kcal": round(buckets[bucket] / covered, 1) if covered else None,
+                "recorded_days": covered,
+                "items_with_value": items_with_value[bucket],
+                "total_items": total_items[bucket],
+                "coverage_status": "missing"
+                if not items_with_value[bucket]
+                else "complete"
+                if covered == period["calendar_days"]
+                and items_with_value[bucket] == total_items[bucket]
+                else "partial",
+            }
+        )
 
     window = 7
     for i, point in enumerate(series):
         lo = max(0, i - window + 1)
-        chunk = [p["calories_kcal"] for p in series[lo : i + 1]]
-        point["rolling_mean"] = round(sum(chunk) / len(chunk), 1)
+        chunk = [p["daily_average_kcal"] for p in series[lo : i + 1]]
+        point["rolling_mean"] = (
+            round(sum(chunk) / window, 1)
+            if len(chunk) == window and all(value is not None for value in chunk)
+            else None
+        )
 
-    return {"group_by": group_by, "series": series, "unaccounted_items": unaccounted}
+    return {
+        **_range_meta(date_from, date_to, group_by),
+        "series": series,
+        "unaccounted_items": unaccounted,
+    }
 
 
 async def macros(
@@ -118,38 +206,78 @@ async def macros(
     (carb 45-65%, fat 20-35%, protein 10-35%) while a user thinks in grams.
     """
     rows = await _rows(user_id, date_from, date_to)
+    periods = _periods(date_from, date_to, group_by)
+    lookup = _period_lookup(periods)
     buckets: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    coverage: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    coverage_days: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     logged_days: set[str] = set()
     unaccounted = 0
     for row in rows:
         nutrients = row.get("nutrients") or {}
-        if not nutrients:
+        present = [macro for macro in MACROS if macro in nutrients]
+        if not present:
             unaccounted += 1
             continue
         logged_days.add(row["meal_date"])
-        key = _bucket(date.fromisoformat(row["meal_date"]), group_by)
-        for macro in MACROS:
-            buckets[key][macro] += float(nutrients.get(macro, 0) or 0)
+        key = lookup[str(row["meal_date"])]
+        for macro in present:
+            buckets[key][macro] += float(nutrients[macro])
+            coverage[key][macro] += 1
+            coverage_days[key][macro].add(str(row["meal_date"]))
 
     series = []
-    for key in sorted(buckets):
-        vals = {m: round(buckets[key][m], 1) for m in MACROS}
-        energy = vals["protein_g"] * 4 + vals["carbs_g"] * 4 + vals["fat_g"] * 9
+    overall_coverage_days: dict[str, set[str]] = defaultdict(set)
+    for period in periods:
+        key = str(period["bucket"])
+        vals = {
+            macro: round(buckets[key][macro], 1) if coverage[key][macro] else None
+            for macro in MACROS
+        }
+        means = {
+            macro: round(buckets[key][macro] / len(coverage_days[key][macro]), 1)
+            if coverage_days[key][macro]
+            else None
+            for macro in MACROS
+        }
+        for macro in MACROS:
+            overall_coverage_days[macro].update(coverage_days[key][macro])
+        complete = all(vals[macro] is not None for macro in ("protein_g", "carbs_g", "fat_g"))
+        energy = (
+            float(vals["protein_g"]) * 4
+            + float(vals["carbs_g"]) * 4
+            + float(vals["fat_g"]) * 9
+            if complete
+            else 0
+        )
         vals["pct_of_energy"] = (
             {
-                "protein": round(vals["protein_g"] * 4 / energy * 100, 1),
-                "carbs": round(vals["carbs_g"] * 4 / energy * 100, 1),
-                "fat": round(vals["fat_g"] * 9 / energy * 100, 1),
+                "protein": round(float(vals["protein_g"]) * 4 / energy * 100, 1),
+                "carbs": round(float(vals["carbs_g"]) * 4 / energy * 100, 1),
+                "fat": round(float(vals["fat_g"]) * 9 / energy * 100, 1),
             }
             if energy
-            else {"protein": 0.0, "carbs": 0.0, "fat": 0.0}
+            else {"protein": None, "carbs": None, "fat": None}
         )
-        series.append({"bucket": key, **vals})
+        series.append(
+            {
+                **period,
+                **vals,
+                "mean_per_covered_day": means,
+                "coverage_items": dict(coverage[key]),
+                "coverage_days": {
+                    macro: len(days) for macro, days in coverage_days[key].items()
+                },
+            }
+        )
 
     return {
-        "group_by": group_by,
+        **_range_meta(date_from, date_to, group_by),
         "series": series,
         "logged_days": len(logged_days),
+        "coverage_days": {
+            macro: len(overall_coverage_days[macro]) for macro in MACROS
+        },
         "unaccounted_items": unaccounted,
         "amdr_reference": {"carbs": [45, 65], "fat": [20, 35], "protein": [10, 35]},
     }
@@ -166,6 +294,8 @@ async def micros(
     rows = await _rows(user_id, date_from, date_to)
     days = max((date_to - date_from).days + 1, 1)
     totals: dict[str, float] = defaultdict(float)
+    coverage_days: dict[str, set[str]] = defaultdict(set)
+    coverage_items: dict[str, int] = defaultdict(int)
     logged_days: set[str] = set()
     unaccounted = 0
     for row in rows:
@@ -178,34 +308,48 @@ async def micros(
             if key in RDA:
                 try:
                     totals[key] += float(value)
+                    coverage_days[key].add(str(row["meal_date"]))
+                    coverage_items[key] += 1
                 except (TypeError, ValueError):
                     continue
 
     panel = []
     for nutrient, targets in RDA.items():
         target_per_day = targets.get(sex, targets["female"])
-        actual_per_day = totals.get(nutrient, 0.0) / days
-        pct = (actual_per_day / target_per_day * 100) if target_per_day else 0.0
+        has_values = bool(coverage_items[nutrient])
+        covered_days = len(coverage_days[nutrient])
+        actual_per_day = totals[nutrient] / covered_days if has_values else None
+        pct = (
+            actual_per_day / target_per_day * 100
+            if actual_per_day is not None and target_per_day
+            else None
+        )
         is_ceiling = nutrient in CEILING_NUTRIENTS
         panel.append(
             {
                 "nutrient": nutrient,
-                "actual_per_day": round(actual_per_day, 2),
+                "actual_per_day": round(actual_per_day, 2) if actual_per_day is not None else None,
                 "rda_per_day": target_per_day,
-                "pct_of_rda": round(pct, 1),
+                "pct_of_rda": round(pct, 1) if pct is not None else None,
                 "direction": "at_most" if is_ceiling else "at_least",
-                "on_track": (pct <= 100) if is_ceiling else (pct >= 100),
+                "on_track": ((pct <= 100) if is_ceiling else (pct >= 100))
+                if pct is not None and covered_days == days
+                else None,
+                "coverage_days": covered_days,
+                "items_with_value": coverage_items[nutrient],
             }
         )
 
     # watchlist: furthest from target first, ceilings that are exceeded included
     watchlist = sorted(
-        panel,
+        [row for row in panel if row["pct_of_rda"] is not None],
         key=lambda p: (p["pct_of_rda"] - 100) if p["direction"] == "at_most" else -p["pct_of_rda"],
         reverse=True,
     )[:5]
 
     return {
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
         "basis": "ICMR-NIN 2020",
         "sex": sex,
         "days": days,
@@ -229,7 +373,8 @@ async def goal_vs_actual(user_id: str, date_from: date, date_to: date) -> dict[s
     for row in rows:
         nutrients = row.get("nutrients") or {}
         for macro in MACROS:
-            by_day[row["meal_date"]][macro] += float(nutrients.get(macro, 0) or 0)
+            if macro in nutrients:
+                by_day[row["meal_date"]][macro] += float(nutrients[macro])
 
     targets = {t["metric"]: t for t in (goal.get("daily_targets") or {}).get("targets", [])}
     series = []
@@ -352,6 +497,8 @@ async def nutrient_series(
 ) -> dict[str, Any]:
     """Nutrient totals and daily equivalents with item/day coverage."""
     rows = await _rows(user_id, date_from, date_to)
+    periods = _periods(date_from, date_to, group_by)
+    lookup = _period_lookup(periods)
     totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     coverage_items: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     coverage_days: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
@@ -365,7 +512,7 @@ async def nutrient_series(
             continue
         meal_date = str(row["meal_date"])
         logged_days.add(meal_date)
-        bucket = _bucket(date.fromisoformat(meal_date), group_by)
+        bucket = lookup[meal_date]
         for nutrient in nutrients:
             if nutrient not in values:
                 continue
@@ -378,11 +525,12 @@ async def nutrient_series(
             coverage_days[bucket][nutrient].add(meal_date)
 
     series = []
-    for bucket in sorted(totals):
+    for period in periods:
+        bucket = str(period["bucket"])
         bucket_totals = {key: round(value, 2) for key, value in totals[bucket].items()}
         series.append(
             {
-                "bucket": bucket,
+                **period,
                 "totals": bucket_totals,
                 "daily_averages": {
                     key: round(value / len(coverage_days[bucket][key]), 2)
@@ -394,7 +542,7 @@ async def nutrient_series(
             }
         )
     return {
-        "group_by": group_by,
+        **_range_meta(date_from, date_to, group_by),
         "nutrients": nutrients,
         "logged_days": len(logged_days),
         "unaccounted_items": unaccounted,
@@ -407,27 +555,35 @@ async def hydration(
 ) -> dict[str, Any]:
     """Aggregate every water log in the requested range server-side."""
     rows = await _water_rows(user_id, date_from, date_to)
+    periods = _periods(date_from, date_to, group_by)
+    lookup = _period_lookup(periods)
     totals: dict[str, float] = defaultdict(float)
     counts: dict[str, int] = defaultdict(int)
     days: dict[str, set[str]] = defaultdict(set)
     for row in rows:
         logged_on = str(row["logged_on"])
-        bucket = _bucket(date.fromisoformat(logged_on), group_by)
+        bucket = lookup[logged_on]
         totals[bucket] += float(row.get("volume_ml") or 0)
         counts[bucket] += 1
         days[bucket].add(logged_on)
     return {
-        "group_by": group_by,
+        **_range_meta(date_from, date_to, group_by),
         "logged_days": len({str(row["logged_on"]) for row in rows}),
         "series": [
             {
-                "bucket": bucket,
-                "volume_ml": round(totals[bucket], 1),
-                "log_count": counts[bucket],
-                "logged_days": len(days[bucket]),
-                "daily_average_ml": round(totals[bucket] / len(days[bucket]), 1),
+                **period,
+                "volume_ml": round(totals[str(period["bucket"])], 1)
+                if counts[str(period["bucket"])]
+                else None,
+                "log_count": counts[str(period["bucket"])],
+                "logged_days": len(days[str(period["bucket"])]),
+                "daily_average_ml": round(
+                    totals[str(period["bucket"])] / len(days[str(period["bucket"])]), 1
+                )
+                if days[str(period["bucket"])]
+                else None,
             }
-            for bucket in sorted(totals)
+            for period in periods
         ],
     }
 

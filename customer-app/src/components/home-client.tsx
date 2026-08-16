@@ -5,11 +5,11 @@ import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 
 import { MealDraftReview } from '@/components/meal-draft-review'
+import { useMediaAnalysis } from '@/components/media-analysis-provider'
 import { BottomNav } from '@/components/nav'
 import { NutrientSpine } from '@/components/nutrient-spine'
-import { api, type Day, type GoalProgressSummaryItem, type Meal, type Message } from '@/lib/api-client'
+import { api, type Day, type GoalProgressSummaryItem, type Meal } from '@/lib/api-client'
 import { localDateISO } from '@/lib/date'
-import { parseMediaMealDraft } from '@/lib/meal-draft'
 import { suggestedMealSlot } from '@/lib/meal-slots'
 
 const MACROS = [
@@ -123,80 +123,31 @@ function EnergyCard({ day, date }: { day: Day; date: string }) {
 function QuickCapture({ date }: { date: string }) {
   const cameraRef = useRef<HTMLInputElement>(null)
   const pdfRef = useRef<HTMLInputElement>(null)
-  const [selection, setSelection] = useState<{ kind: 'image' | 'pdf'; name: string } | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [draftMessage, setDraftMessage] = useState<Message | null>(null)
-  const [captureError, setCaptureError] = useState('')
-  const [loggedCount, setLoggedCount] = useState<number | null>(null)
+  const {
+    selection, previewUrl, processingCount, draftMessages, captureError, loggedCount,
+    processFile, clearCapture, completeCapture,
+  } = useMediaAnalysis()
   const [stage, setStage] = useState(0)
-
-  const capture = useMutation({
-    mutationFn: (file: File) => {
-      const form = new FormData()
-      form.set('file', file)
-      return api.sendMessage(form)
-    },
-    onSuccess: (created) => {
-      const draft = created.find((message) =>
-        message.status === 'needs_confirmation' && parseMediaMealDraft(message.payload)
-      )
-      if (draft) {
-        setDraftMessage(draft)
-        return
-      }
-      const failed = created.find((message) => message.status === 'failed')
-      const reply = [...created].reverse().find((message) => message.msg_text)
-      setCaptureError(failed?.msg_text || reply?.msg_text || 'No reviewable meal items were detected. Try another file.')
-    },
-    onError: (error) => setCaptureError(error.message),
-    onSettled: () => {
-      if (cameraRef.current) cameraRef.current.value = ''
-      if (pdfRef.current) pdfRef.current.value = ''
-    },
-  })
+  const processing = processingCount > 0
 
   useEffect(() => {
-    if (!capture.isPending) return
+    if (!processing) return
     setStage(0)
     const timer = window.setInterval(() => setStage((current) => Math.min(current + 1, 2)), 1800)
     return () => window.clearInterval(timer)
-  }, [capture.isPending])
-
-  useEffect(() => () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl)
-  }, [previewUrl])
-
-  const processFile = (file: File, kind: 'image' | 'pdf') => {
-    setCaptureError('')
-    setLoggedCount(null)
-    setDraftMessage(null)
-    setSelection({ kind, name: file.name })
-    setPreviewUrl(kind === 'image' ? URL.createObjectURL(file) : null)
-    capture.mutate(file)
-  }
-
-  const clearCapture = () => {
-    setDraftMessage(null)
-    setSelection(null)
-    setPreviewUrl(null)
-  }
-
-  const completeCapture = (count: number) => {
-    clearCapture()
-    setLoggedCount(count)
-  }
+  }, [processing])
 
   const imageStages = ['Securing your photo', 'Detecting meal items', 'Preparing editable portions']
   const pdfStages = ['Securing your PDF', 'Reading diary rows', 'Preparing editable portions']
-  const stages = selection?.kind === 'pdf' ? pdfStages : imageStages
+  const stages = selection?.kind === 'pdf' || (!selection && draftMessages[0]?.msg_type === 'pdf') ? pdfStages : imageStages
 
   return (
-    <section aria-labelledby="quick-capture-heading" className="card mb-4 p-5 sm:p-6"
+    <section id="quick-capture" aria-labelledby="quick-capture-heading" className="card mb-4 scroll-mt-20 p-5 sm:p-6"
       style={{ background: 'linear-gradient(135deg, var(--color-accent-strong), color-mix(in oklch, var(--color-accent-strong) 78%, var(--color-tx)))', borderColor: 'transparent', color: 'var(--color-on-accent)' }}>
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden
-        onChange={(event) => { const file = event.target.files?.[0]; if (file) processFile(file, 'image') }} />
+        onChange={(event) => { const file = event.target.files?.[0]; if (file) processFile(file, 'image'); event.currentTarget.value = '' }} />
       <input ref={pdfRef} type="file" accept="application/pdf" hidden
-        onChange={(event) => { const file = event.target.files?.[0]; if (file) processFile(file, 'pdf') }} />
+        onChange={(event) => { const file = event.target.files?.[0]; if (file) processFile(file, 'pdf'); event.currentTarget.value = '' }} />
 
       <div className="grid gap-5 sm:grid-cols-[1fr_auto] sm:items-center">
         <div>
@@ -213,26 +164,54 @@ function QuickCapture({ date }: { date: string }) {
       </div>
 
       <div className="mt-5 grid gap-2 sm:grid-cols-[2fr_1fr]">
-        <button type="button" className="btn-secondary flex items-center justify-center gap-2 border-0" disabled={capture.isPending}
+        <button type="button" className="btn-secondary flex items-center justify-center gap-2 border-0" disabled={processing}
           style={{ color: 'var(--color-accent-strong)' }} onClick={() => cameraRef.current?.click()}>
           <CameraIcon /> Take meal photo
         </button>
-        <button type="button" className="rounded-[15px] border px-4 font-bold" disabled={capture.isPending}
+        <button type="button" className="rounded-[15px] border px-4 font-bold" disabled={processing}
           style={{ borderColor: 'color-mix(in oklch, var(--color-on-accent) 42%, transparent)', color: 'var(--color-on-accent)' }} onClick={() => pdfRef.current?.click()}>
           Upload PDF
         </button>
       </div>
 
-      {selection && (
+      {(selection || processing) && (
         <div className="mt-4 overflow-hidden rounded-2xl border" style={{ borderColor: 'color-mix(in oklch, var(--color-on-accent) 25%, transparent)', background: 'color-mix(in oklch, var(--color-tx) 20%, transparent)' }}>
-          {previewUrl ? <img src={previewUrl} alt="Meal selected for review" className="max-h-52 w-full object-cover" /> : (
+          {previewUrl ? (
+            <div className="relative isolate overflow-hidden">
+              <img src={previewUrl} alt="Meal selected for review" className={`max-h-60 w-full object-cover transition duration-500 ${processing ? 'scale-[1.02] brightness-75 saturate-75' : ''}`} />
+              {processing && (
+                <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
+                  <div className="media-scan-grid absolute inset-0" />
+                  <div className="media-scan-frame absolute inset-5 rounded-xl border" />
+                  <div className="media-scan-line absolute left-5 right-5" />
+                  <div className="absolute left-3 top-3 flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] backdrop-blur-md"
+                    style={{ background: 'color-mix(in oklch, var(--color-tx) 58%, transparent)', borderColor: 'color-mix(in oklch, var(--color-on-accent) 30%, transparent)', color: 'var(--color-on-accent)' }}>
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: 'var(--color-on-accent)', boxShadow: '0 0 10px var(--color-on-accent)' }} />
+                    Analyzing image
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : selection ? (
             <p className="p-4 text-sm font-semibold">PDF: {selection.name}</p>
+          ) : (
+            <p className="p-4 text-sm font-semibold">Resuming your persisted upload analysis…</p>
           )}
-          {capture.isPending && (
+          {processing && (
             <div className="p-4" role="status" aria-live="polite">
-              <p className="font-semibold">{stages[stage]}</p>
+              <div className="flex items-center gap-2.5">
+                <span
+                  className="h-5 w-5 shrink-0 animate-spin rounded-full border-2"
+                  style={{
+                    borderColor: 'color-mix(in oklch, var(--color-on-accent) 28%, transparent)',
+                    borderTopColor: 'var(--color-on-accent)',
+                  }}
+                  aria-hidden="true"
+                />
+                <p className="font-semibold">{stages[stage]}</p>
+              </div>
               <p className="mt-1 text-sm" style={{ color: 'color-mix(in oklch, var(--color-on-accent) 76%, transparent)' }}>This can take a moment. Nothing is logged until you confirm.</p>
-              <div className="mt-3 flex gap-1.5" aria-hidden="true">{stages.map((_, index) => <span key={index} className="h-1.5 flex-1 rounded-full" style={{ background: index <= stage ? 'var(--color-on-accent)' : 'color-mix(in oklch, var(--color-on-accent) 25%, transparent)' }} />)}</div>
+              <div className="mt-3 flex gap-1.5" aria-hidden="true">{stages.map((_, index) => <span key={index} className={`h-1.5 flex-1 rounded-full ${index <= stage ? 'animate-pulse' : ''}`} style={{ background: index <= stage ? 'var(--color-on-accent)' : 'color-mix(in oklch, var(--color-on-accent) 25%, transparent)' }} />)}</div>
             </div>
           )}
         </div>
@@ -240,12 +219,12 @@ function QuickCapture({ date }: { date: string }) {
       {captureError && <p className="mt-4 rounded-xl p-3 text-sm font-semibold" role="alert" style={{ background: 'var(--color-surface)', color: 'var(--color-danger)' }}>{captureError}</p>}
       {loggedCount != null && <p className="mt-4 rounded-xl p-3 text-sm font-semibold" role="status" style={{ background: 'var(--color-surface)', color: 'var(--color-accent-strong)' }}>{loggedCount} {loggedCount === 1 ? 'item' : 'items'} added to your meal log.</p>}
 
-      {draftMessage && (
-        <div className="mt-4" style={{ color: 'var(--color-tx)' }}>
+      {draftMessages.map((draftMessage) => (
+        <div key={draftMessage.id} className="mt-4" style={{ color: 'var(--color-tx)' }}>
           <MealDraftReview messageId={draftMessage.id} payload={draftMessage.payload} initialDate={date}
             onConfirmed={(result) => completeCapture(result.created)} onDiscard={clearCapture} />
         </div>
-      )}
+      ))}
     </section>
   )
 }

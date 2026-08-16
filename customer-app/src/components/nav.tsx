@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 const TABS = [
   { href: '/home', label: 'Today', icon: 'home' },
   { href: '/meals', label: 'Meals', icon: 'meals' },
-  { href: '/agent', label: 'Log', icon: 'plus' },
+  { href: '/agent', label: 'Chat', icon: 'chat' },
   { href: '/analytics', label: 'Trends', icon: 'trends' },
   { href: '/about', label: 'You', icon: 'user' },
 ] as const
@@ -51,7 +51,7 @@ function NavIcon({ name }: { name: typeof TABS[number]['icon'] }) {
     <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
       {name === 'home' && <><path {...common} d="m3.5 10.8 8.5-7 8.5 7" /><path {...common} d="M5.5 9.5v10h13v-10M9.5 19.5v-6h5v6" /></>}
       {name === 'meals' && <><path {...common} d="M5 4.5h14v15H5z" /><path {...common} d="M8 8h8M8 12h8M8 16h5" /></>}
-      {name === 'plus' && <><path {...common} d="M12 6v12M6 12h12" /></>}
+      {name === 'chat' && <><path {...common} d="M5.5 5.5h13a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4.5 3v-3H5.5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z" /><path {...common} d="M8 10h8M8 13.5h5" /></>}
       {name === 'trends' && <><path {...common} d="M4 19V5M4 19h16" /><path {...common} d="m7 15 4-4 3 2 5-6" /></>}
       {name === 'user' && <><circle {...common} cx="12" cy="8" r="3.5" /><path {...common} d="M5.5 20c.8-4 3-6 6.5-6s5.7 2 6.5 6" /></>}
     </svg>

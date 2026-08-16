@@ -110,6 +110,7 @@ class GoalMetricProgress(BaseModel):
     direction: str
     today: ProgressValue
     period: ProgressValue
+    calendar: list[CalendarDayResponse]
 
 
 class GoalProgressSummary(BaseModel):
@@ -119,6 +120,7 @@ class GoalProgressSummary(BaseModel):
     cadence: str
     is_primary: bool
     label: str
+    derivation: dict[str, Any]
     starts_on: date
     ends_on: date
     today: ProgressValue
