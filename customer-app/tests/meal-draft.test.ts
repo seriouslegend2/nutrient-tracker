@@ -7,6 +7,7 @@ import {
   parseMediaMealDraft,
 } from '../src/lib/meal-draft'
 import { suggestedMealSlot } from '../src/lib/meal-slots'
+import { normalizeMealServings } from '../src/lib/servings'
 
 describe('resolved media meal drafts', () => {
   const payload = {
@@ -45,11 +46,19 @@ describe('resolved media meal drafts', () => {
       evidenceId: 'evidence-1',
       resolvedName: 'Paneer Butter Masala',
       foodId: 'dish-1',
-      servings: 1.25,
+      servings: 1.5,
       servingUnit: 'katori',
       gramsPerServing: 160,
       amountSource: 'agent1_user_stated',
     })
+  })
+
+  it('rounds meal servings half-up to the nearest half unit', () => {
+    expect(normalizeMealServings(0.1)).toBe(0.5)
+    expect(normalizeMealServings(1.24)).toBe(1)
+    expect(normalizeMealServings(1.25)).toBe(1.5)
+    expect(normalizeMealServings(1.74)).toBe(1.5)
+    expect(normalizeMealServings(1.75)).toBe(2)
   })
 
   it('edits servings while deriving grams and nutrition from the fixed serving', () => {

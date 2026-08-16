@@ -7,16 +7,25 @@ prompt.py - they must match exactly.
 
 from __future__ import annotations
 
-from typing import Any, NotRequired
+from typing import NotRequired
 
 from langchain.agents import AgentState
 
 
 class NutritionChatState(AgentState):
     user_id: NotRequired[str]
-    user_profile: NotRequired[str]
-    active_goal: NotRequired[str]
+    clock: NotRequired[str]
+    profile: NotRequired[str]
     preferences: NotRequired[str]
-    extraction_payload: NotRequired[dict[str, Any]]
+    portion_categories: NotRequired[str]
+    today_date: NotRequired[str]
+    today_meals: NotRequired[str]
+    today_totals: NotRequired[str]
+    today_unaccounted_meal_items: NotRequired[str]
+    today_water: NotRequired[str]
+    today_training_checked_in: NotRequired[str]
+    latest_body_metric: NotRequired[str]
+    active_goals: NotRequired[str]
+    pending_media_draft: NotRequired[str]
     """Set when the turn started from a photo/video/pdf message - carries the
     mass-distribution or diary-row draft so the model can reference it."""

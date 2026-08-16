@@ -19,6 +19,36 @@ _ACTIVE = "is_active"
 _COLS = "*"
 
 
+async def confirm_media_draft(
+    *,
+    user_id: str,
+    message_id: str,
+    meal_date: date,
+    meal_type: str,
+    items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    result = await call_rpc(
+        "fn_confirm_media_meal_draft",
+        {
+            "p_user_id": user_id,
+            "p_message_id": message_id,
+            "p_meal_date": meal_date,
+            "p_meal_type": meal_type,
+            "p_items": items,
+        },
+    )
+    if not isinstance(result, dict):
+        raise RuntimeError("Media confirmation returned no result")
+    return result
+
+
+async def discard_media_draft(*, user_id: str, message_id: str) -> None:
+    await call_rpc(
+        "fn_discard_media_meal_draft",
+        {"p_user_id": user_id, "p_message_id": message_id},
+    )
+
+
 async def list_meals(
     *,
     user_id: str,
@@ -104,9 +134,22 @@ async def next_day_version(user_id: str, day: date) -> int:
 
 
 async def insert_meal(row: dict[str, Any]) -> dict[str, Any]:
-    sb = await get_supabase()
-    res = await sb.table("meals").insert(row).execute()
-    return res.data[0]
+    item = {
+        key: value
+        for key, value in row.items()
+        if key not in {"user_id", "meal_date", "version", "is_active"}
+    }
+    result = await call_rpc(
+        "fn_append_meal_item",
+        {
+            "p_user_id": row["user_id"],
+            "p_meal_date": row["meal_date"],
+            "p_item": item,
+        },
+    )
+    if not isinstance(result, dict):
+        raise RuntimeError("Meal append returned no row")
+    return result
 
 
 async def get_meal(user_id: str, meal_id: str) -> dict[str, Any] | None:

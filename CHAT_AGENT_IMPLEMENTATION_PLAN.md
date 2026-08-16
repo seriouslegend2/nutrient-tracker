@@ -12,6 +12,32 @@ This plan treats the chatbot as the top-level coordinator. Deterministic domain
 services remain responsible for nutrition arithmetic, goal progress, serving
 conversion, validation, persistence, and authorization.
 
+## Implementation Status
+
+The first end-to-end implementation is now present in the repository:
+
+- Typed `NutritionContextSnapshot` with user-local clock, profile safety facts,
+  preferences as untrusted data, household portions, today's meals/water/training,
+  latest body metric, and every active goal without full calendars.
+- Bounded read tools for today, goals, portions, hydration, body metrics, and
+  deterministic nutrition reports.
+- A real LangSmith `ChatPromptTemplate` with an identical checked-in fallback.
+- Dedicated `ORCHESTRATION_MODEL`, defaulting to `gpt-5.4`.
+- Durable, expiring, user-scoped, idempotent action proposals with fenced
+  confirmation, execution, failure, and discard states.
+- Structured customer confirmation cards for meal, nutrient, goal, water,
+  weight, portion, unknown-item, training, and goal-management mutations.
+- Text and transcribed audio use the same orchestrator; attached audio notes are
+  preserved.
+- Images and PDFs run both specialist stages before a compact, read-only chat
+  handoff and retain the dedicated editable review card.
+- Media confirmation is one database transaction and is idempotent across retries.
+- Prompt, context, action, modality, database, customer, and build verification.
+
+Remaining release work is operational: deploy the new migration/backend/customer
+build, publish and pin the approved LangSmith prompt revision, run live-provider
+chat/audio/media evaluations, and monitor the limited rollout.
+
 ## Scope Assumption
 
 The current product's "household" data means one signed-in user's usual category
@@ -87,14 +113,18 @@ Suggested top-level contract:
 ```json
 {
   "clock": {},
-  "persona": {},
-  "safety": {},
+  "profile": {},
   "preferences": [],
-  "household_portions": [],
-  "today": {},
+  "portion_categories": [],
+  "today_date": "YYYY-MM-DD",
+  "today_meals": [],
+  "today_totals": {},
+  "today_water": {},
+  "today_training_checked_in": false,
+  "latest_body_metric": null,
   "active_goals": [],
-  "pending_action": null,
-  "pending_media_draft": null
+  "conversation": [],
+  "current_user_input": ""
 }
 ```
 
@@ -209,24 +239,21 @@ retrieval only when the customer asks for date-level history.
 
 ## Phase 2: Authoritative Read Tools
 
-Add small, typed, user-scoped tools:
+Current-state facts are injected once per turn. Keep only bounded on-demand tools:
 
 | Tool | Responsibility |
 | --- | --- |
-| `get_today_snapshot` | Current local-day meals, totals, water, training, and unknown coverage |
-| `get_goal_progress` | Compact progress for all goals or one selected goal |
-| `get_goal_calendar` | Bounded date slice for one goal |
-| `get_household_portions` | Fixed units and user usual counts |
-| `get_meal_history` | Bounded meal rows with explicit coverage metadata |
-| `get_hydration` | Daily or ranged water totals |
-| `get_body_metrics` | Latest or bounded weight/waist history |
-| `get_nutrition_report` | Existing deterministic macro/micro/nutrient reports |
-| `get_meal_patterns` | Existing meal timing and coverage report |
-| `search_dishes` | Bounded candidate retrieval |
-| `get_dish_details` | Full serving and nutrition details for selected IDs |
-| `list_categories` | Global category definitions and user counts |
-| `get_pending_action` | Exact operation awaiting confirmation |
-| `get_pending_media_draft` | Compact status-aware draft summary |
+| `search_food_catalog` | Bounded compact candidate retrieval; never inject the full catalog |
+| `query_tracker_history` | Bounded historical meals, nutrition, hydration, or body metrics |
+
+The mutation surface is four model-facing tools with separate internal action types:
+
+| Tool | Responsibility |
+| --- | --- |
+| `manage_meal_entry` | Create catalog/free-text or exact-nutrition entries; update, identify, or delete meals |
+| `manage_goal` | Create, activate, deactivate, or make a goal primary |
+| `record_health_event` | Water, weight, or training events |
+| `set_portion_preference` | Change a customer's usual fixed-unit count |
 
 Every read tool must enforce user identity from runtime context, validate date
 ranges, cap output size, and report truncation rather than silently dropping rows.
@@ -376,7 +403,7 @@ Recommended allocation:
 
 | Component | Initial model policy |
 | --- | --- |
-| Nutrition orchestrator | `gpt-4.1` |
+| Nutrition orchestrator | `gpt-5.4` |
 | Media facts | Keep `gpt-4.1-mini` pending evaluations |
 | Media meal resolver | Keep `gpt-4.1-mini` pending evaluations |
 | Manual meal resolver | Keep `gpt-4.1-mini` pending evaluations |
@@ -542,6 +569,7 @@ The work is complete when:
 - Every mutation is validated, user-scoped, auditable, and idempotent.
 - Confirmation is bound to one persisted operation.
 - Media confirmation is atomic.
+- Confirmed meal mutations and action-ledger completion are atomic.
 - Goal answers correctly describe today, tomorrow, and period state.
 - The production prompt is a pinned LangSmith `ChatPromptTemplate` with a tested
   local fallback.

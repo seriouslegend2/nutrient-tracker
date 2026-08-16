@@ -20,12 +20,16 @@ from app.agents.media_meal_resolver.prompt import (
     MEDIA_MEAL_RESOLVER_PROMPT_NAME,
     MEDIA_MEAL_RESOLVER_USER_PROMPT,
 )
-from app.agents.nutrition_chat.prompt import NUTRITION_CHAT_PROMPT
+from app.agents.nutrition_chat.prompt import (
+    NUTRITION_CHAT_PROMPT,
+    NUTRITION_CHAT_PROMPT_NAME,
+    nutrition_chat_prompt_template,
+)
 from app.config.settings import settings
 from app.services.prompts import langsmith_client
 
 PROMPTS = {
-    "nutrition-chat-v1": (
+    NUTRITION_CHAT_PROMPT_NAME: (
         NUTRITION_CHAT_PROMPT,
         "System instructions for the authenticated nutrition chat agent.",
     ),
@@ -44,7 +48,15 @@ PROMPTS = {
 }
 
 
-def prompt_object(name: str, text: str) -> ChatPromptTemplate | PromptTemplate:
+def prompt_object(name: str, text: str | ChatPromptTemplate) -> ChatPromptTemplate | PromptTemplate:
+    if name == NUTRITION_CHAT_PROMPT_NAME:
+        if isinstance(text, ChatPromptTemplate):
+            return text
+        return nutrition_chat_prompt_template(text)
+
+    if not isinstance(text, str):
+        raise TypeError(f"Prompt {name!r} requires a string fallback")
+
     chat_user_templates = {
         MANUAL_MEAL_RESOLVER_PROMPT_NAME: MANUAL_MEAL_RESOLVER_USER_PROMPT,
         MEDIA_FACTS_PROMPT_NAME: MEDIA_FACTS_USER_PROMPT,

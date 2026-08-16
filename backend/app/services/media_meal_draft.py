@@ -10,6 +10,7 @@ from app.agents.media_facts.models import MediaFacts, MediaQuantity
 from app.agents.media_meal_resolver.runner import run_media_meal_resolver_agent
 from app.domain.dishes import repository as dish_repo
 from app.domain.dishes.resolve import resolve_portion, scale_unit_nutrients
+from app.domain.meals.servings import normalize_meal_servings
 
 _MEAL_SLOTS = {"breakfast", "brunch", "lunch", "snacks", "dinner", "misc"}
 
@@ -111,7 +112,9 @@ def _resolve_quantity(
             f"Agent 1 quantity {quantity.value} {quantity.unit} cannot be converted "
             f"to fixed unit {portion_unit}"
         )
-    return round(grams / portion_grams, 3), grams, f"agent1_{quantity.source}"
+    servings = normalize_meal_servings(grams / portion_grams)
+    review_grams = round(servings * portion_grams, 2)
+    return servings, review_grams, f"agent1_{quantity.source}"
 
 
 async def build_media_meal_draft(

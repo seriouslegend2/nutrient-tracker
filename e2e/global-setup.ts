@@ -34,6 +34,7 @@ const TABLE_MIGRATIONS: Record<string, string> = {
   activity_logs: '20260816130000_multi_goal_cadence.sql',
   communication_master: '20260815100400_goals_and_logs.sql',
   agent_runs: '20260815100400_goals_and_logs.sql',
+  agent_actions: '20260816220000_agent_actions.sql',
   audit_log: '20260815100400_goals_and_logs.sql',
 }
 
@@ -54,6 +55,10 @@ const REQUIRED_RPCS: Record<string, string> = {
   fn_upsert_preference: '20260816110000_backend_database_remediation.sql',
   fn_set_dish_household: '20260816110000_backend_database_remediation.sql',
   fn_set_category_household: '20260816110000_backend_database_remediation.sql',
+  fn_create_agent_action: '20260816220000_agent_actions.sql',
+  fn_confirm_agent_action: '20260816220000_agent_actions.sql',
+  fn_execute_meal_agent_action: '20260817100000_atomic_meal_agent_actions.sql',
+  fn_append_meal_item: '20260817100000_atomic_meal_agent_actions.sql',
 }
 
 export default async function globalSetup(_config: FullConfig): Promise<void> {

@@ -711,6 +711,24 @@ def test_unknown_meal_can_be_relinked_in_one_coherent_version() -> None:
     )
 
 
+def test_meal_servings_are_normalized_to_half_units_in_database() -> None:
+    day = "2026-08-04"
+    meal_id = psql(
+        f"""WITH inserted AS (
+            INSERT INTO meals (
+                user_id, meal_date, meal_type, dish_name, portions, portion_unit,
+                nutrients, resolved_from, source)
+            VALUES ('{USER_ID}', '{day}', 'lunch', 'half-step test', 1.25, 'serving',
+                    '{{}}'::jsonb, 'unknown', 'manual')
+            RETURNING id
+        ) SELECT id FROM inserted;"""
+    )
+
+    assert float(psql(f"SELECT portions FROM meals WHERE id='{meal_id}';")) == 1.5
+    psql(f"UPDATE meals SET portions=0.1 WHERE id='{meal_id}';")
+    assert float(psql(f"SELECT portions FROM meals WHERE id='{meal_id}';")) == 0.5
+
+
 def test_preference_and_portion_swaps_are_versioned_atomically() -> None:
     psql(
         f"SELECT count(*) FROM fn_upsert_preference("
@@ -981,7 +999,267 @@ def test_weight_based_categories_use_one_human_serving() -> None:
 
 def test_energy_is_never_stored_on_a_seeded_dish() -> None:
     """EuroFIR Step 10: energy is always calculated, never borrowed."""
-    stored = psql(
-        "SELECT count(*) FROM dish_global WHERE nutrients_per_unit ? 'calories_kcal';"
-    )
+    stored = psql("SELECT count(*) FROM dish_global WHERE nutrients_per_unit ? 'calories_kcal';")
     assert int(stored) == 0, "seeded dishes must not carry a stored energy value"
+
+
+def test_agent_action_creation_is_user_scoped_and_idempotent() -> None:
+    first = psql(
+        f"""SELECT id FROM fn_create_agent_action(
+            '{USER_ID}', 'log_water',
+            '{{"volume_ml":500,"logged_on":"2026-08-16"}}'::jsonb,
+            'Log 500 ml of water on 2026-08-16.',
+            'integration-action-key', now() + interval '30 minutes');"""
+    )
+    repeated = psql(
+        f"""SELECT id FROM fn_create_agent_action(
+            '{USER_ID}', 'log_water',
+            '{{"volume_ml":500,"logged_on":"2026-08-16"}}'::jsonb,
+            'Log 500 ml of water on 2026-08-16.',
+            'integration-action-key', now() + interval '30 minutes');"""
+    )
+    assert repeated == first
+    assert psql(f"SELECT status FROM agent_actions WHERE id='{first}';") == "proposed"
+    with pytest.raises(AssertionError, match="immutable"):
+        psql(f"UPDATE agent_actions SET arguments='{{}}'::jsonb WHERE id='{first}';")
+    psql(f"SELECT id FROM fn_confirm_agent_action('{USER_ID}', '{first}');")
+    claim = json.loads(psql(f"SELECT fn_claim_agent_action('{USER_ID}', '{first}', 60)::text;"))
+    assert claim["claimed"] is True
+    psql(
+        f"UPDATE agent_actions SET execution_lease_expires_at=now() - interval '1 second' "
+        f"WHERE id='{first}';"
+    )
+    assert psql(f"SELECT status FROM fn_get_agent_action('{USER_ID}', '{first}');") == "failed"
+
+
+def test_media_confirmation_is_atomic_and_idempotent() -> None:
+    message_id = psql(
+        f"""WITH inserted AS (
+                INSERT INTO communication_master (
+                    user_id, direction, msg_type, status, payload)
+                VALUES ('{USER_ID}', 'inbound', 'image', 'needs_confirmation', '{{}}'::jsonb)
+                RETURNING id
+            ) SELECT id FROM inserted;"""
+    )
+    items = """[{
+        "dish_name":"Atomic media item",
+        "food_id":null,
+        "category":"unknown",
+        "portions":1,
+        "portion_unit":"g",
+        "grams":100,
+        "nutrients":{},
+        "resolved_from":"unknown",
+        "confidence":"high",
+        "source":"photo",
+        "note":"atomic-media-test"
+    }]""".replace("\n", "")
+    first = json.loads(
+        psql(
+            f"""SELECT fn_confirm_media_meal_draft(
+                '{USER_ID}', '{message_id}', '2026-09-01', 'dinner',
+                '{items}'::jsonb)::text;"""
+        )
+    )
+    repeated = json.loads(
+        psql(
+            f"""SELECT fn_confirm_media_meal_draft(
+                '{USER_ID}', '{message_id}', '2026-09-01', 'dinner',
+                '{items}'::jsonb)::text;"""
+        )
+    )
+
+    assert first == repeated
+    assert first["created"] == 1
+    assert (
+        psql(f"SELECT count(*) FROM meals WHERE user_id='{USER_ID}' AND note='atomic-media-test';")
+        == "1"
+    )
+    assert psql(f"SELECT status FROM communication_master WHERE id='{message_id}';") == "confirmed"
+    with pytest.raises(AssertionError, match="already been logged"):
+        psql(f"SELECT fn_discard_media_meal_draft('{USER_ID}', '{message_id}');")
+
+
+def test_atomic_meal_action_commits_once_and_replays_without_duplication() -> None:
+    arguments = json.dumps(
+        {
+            "meal_date": "2026-08-18",
+            "meal_type": "misc",
+            "label": "Atomic verification",
+            "calories_kcal": 1,
+            "protein_g": None,
+            "carbs_g": None,
+            "fat_g": None,
+            "fiber_g": None,
+        }
+    ).replace("'", "''")
+    action_id = psql(
+        f"""SELECT id FROM fn_create_agent_action(
+            '{USER_ID}', 'log_nutrition_entry',
+            '{arguments}'::jsonb,
+            'Atomic verification', 'atomic-verification', now() + interval '30 minutes');"""
+    )
+    psql(f"SELECT id FROM fn_confirm_agent_action('{USER_ID}', '{action_id}');")
+    claim = json.loads(psql(f"SELECT fn_claim_agent_action('{USER_ID}', '{action_id}', 60)::text;"))
+    token = claim["claim_token"]
+    prepared = json.dumps(
+        {
+            "item": {
+                "meal_type": "misc",
+                "dish_name": "Atomic verification",
+                "food_id": None,
+                "category": None,
+                "portions": 1,
+                "portion_unit": "serving",
+                "grams": None,
+                "nutrients": {"calories_kcal": 1},
+                "resolved_from": "meals",
+                "confidence": None,
+                "source": "chat",
+                "note": None,
+            }
+        }
+    ).replace("'", "''")
+    first = psql(
+        f"SELECT status || '|' || (result->>'meal_id') FROM fn_execute_meal_agent_action("
+        f"'{USER_ID}', '{action_id}', '{token}', '{prepared}'::jsonb);"
+    )
+    replay = psql(
+        f"SELECT status || '|' || (result->>'meal_id') FROM fn_execute_meal_agent_action("
+        f"'{USER_ID}', '{action_id}', '{token}', '{prepared}'::jsonb);"
+    )
+
+    assert first == replay
+    assert first.startswith("completed|")
+    assert (
+        psql(
+            f"SELECT count(*) FROM meals WHERE user_id='{USER_ID}' "
+            "AND dish_name='Atomic verification' AND is_active;"
+        )
+        == "1"
+    )
+
+
+def test_atomic_meal_action_rolls_back_on_prepared_argument_mismatch() -> None:
+    arguments = json.dumps(
+        {
+            "meal_date": "2026-08-19",
+            "meal_type": "misc",
+            "label": "Rollback verification",
+            "calories_kcal": 1,
+            "protein_g": None,
+            "carbs_g": None,
+            "fat_g": None,
+            "fiber_g": None,
+        }
+    ).replace("'", "''")
+    action_id = psql(
+        f"""SELECT id FROM fn_create_agent_action(
+            '{USER_ID}', 'log_nutrition_entry',
+            '{arguments}'::jsonb,
+            'Rollback verification', 'rollback-verification', now() + interval '30 minutes');"""
+    )
+    psql(f"SELECT id FROM fn_confirm_agent_action('{USER_ID}', '{action_id}');")
+    claim = json.loads(psql(f"SELECT fn_claim_agent_action('{USER_ID}', '{action_id}', 60)::text;"))
+    token = claim["claim_token"]
+    prepared = json.dumps(
+        {
+            "item": {
+                "meal_type": "misc",
+                "dish_name": "Rollback verification",
+                "portions": 1,
+                "portion_unit": "serving",
+                "nutrients": {"calories_kcal": 2},
+                "resolved_from": "meals",
+                "source": "chat",
+            }
+        }
+    ).replace("'", "''")
+
+    with pytest.raises(AssertionError, match="differs from stated nutrients"):
+        psql(
+            f"SELECT id FROM fn_execute_meal_agent_action("
+            f"'{USER_ID}', '{action_id}', '{token}', '{prepared}'::jsonb);"
+        )
+    assert psql(f"SELECT status FROM agent_actions WHERE id='{action_id}';") == "executing"
+    assert (
+        psql(
+            f"SELECT count(*) FROM meals WHERE user_id='{USER_ID}' "
+            "AND dish_name='Rollback verification';"
+        )
+        == "0"
+    )
+
+
+def test_atomic_meal_update_and_delete_preserve_coherent_day_versions() -> None:
+    item = json.dumps(
+        {
+            "meal_type": "misc",
+            "dish_name": "Atomic editable",
+            "portions": 1,
+            "portion_unit": "serving",
+            "grams": None,
+            "nutrients": {},
+            "resolved_from": "unknown",
+            "source": "chat",
+        }
+    ).replace("'", "''")
+    meal_id = json.loads(
+        psql(f"SELECT fn_append_meal_item('{USER_ID}', '2026-08-20', '{item}'::jsonb)::text;")
+    )["id"]
+
+    edit_arguments = json.dumps({"meal_id": meal_id, "portions": 2, "grams": None}).replace(
+        "'", "''"
+    )
+    edit_id = psql(
+        f"""SELECT id FROM fn_create_agent_action(
+            '{USER_ID}', 'edit_meal', '{edit_arguments}'::jsonb,
+            'Edit atomic meal', 'atomic-edit', now() + interval '30 minutes');"""
+    )
+    psql(f"SELECT id FROM fn_confirm_agent_action('{USER_ID}', '{edit_id}');")
+    edit_claim = json.loads(
+        psql(f"SELECT fn_claim_agent_action('{USER_ID}', '{edit_id}', 60)::text;")
+    )
+    edit_patch = json.dumps(
+        {
+            "patch": {
+                "portions": 2,
+                "portion_unit": "serving",
+                "grams": None,
+                "nutrients": {},
+                "resolved_from": "unknown",
+            }
+        }
+    ).replace("'", "''")
+    edited = json.loads(
+        psql(
+            f"SELECT to_jsonb(a)::text FROM fn_execute_meal_agent_action("
+            f"'{USER_ID}', '{edit_id}', '{edit_claim['claim_token']}', "
+            f"'{edit_patch}'::jsonb) a;"
+        )
+    )
+    edited_meal_id = edited["result"]["meal_id"]
+    assert psql(f"SELECT portions FROM meals WHERE id='{edited_meal_id}';") == "2"
+
+    delete_arguments = json.dumps({"meal_id": edited_meal_id}).replace("'", "''")
+    delete_id = psql(
+        f"""SELECT id FROM fn_create_agent_action(
+            '{USER_ID}', 'remove_meal', '{delete_arguments}'::jsonb,
+            'Delete atomic meal', 'atomic-delete', now() + interval '30 minutes');"""
+    )
+    psql(f"SELECT id FROM fn_confirm_agent_action('{USER_ID}', '{delete_id}');")
+    delete_claim = json.loads(
+        psql(f"SELECT fn_claim_agent_action('{USER_ID}', '{delete_id}', 60)::text;")
+    )
+    psql(
+        f"SELECT id FROM fn_execute_meal_agent_action("
+        f"'{USER_ID}', '{delete_id}', '{delete_claim['claim_token']}', '{{}}'::jsonb);"
+    )
+
+    assert (
+        psql(
+            f"SELECT count(*) FROM meals WHERE user_id='{USER_ID}' "
+            "AND meal_date='2026-08-20' AND is_active;"
+        )
+        == "0"
+    )

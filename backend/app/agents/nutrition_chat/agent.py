@@ -11,26 +11,27 @@ from langchain.agents import create_agent
 from langchain.agents.structured_output import AutoStrategy
 from langchain_core.runnables import RunnableConfig
 
+from app.agents.nutrition_chat.action_executors import register_action_executors
+from app.agents.nutrition_chat.action_tools import mutation_action_tools
 from app.agents.nutrition_chat.middleware import (
     ModelAndPromptMiddleware,
     UserContextMiddleware,
     resolve_model,
 )
-from app.agents.nutrition_chat.models import ChatTurn
+from app.agents.nutrition_chat.models import ChatResponse
 from app.agents.nutrition_chat.prompt import NUTRITION_CHAT_PROMPT
+from app.agents.nutrition_chat.read_tools import read_tools as snapshot_read_tools
 from app.agents.nutrition_chat.state import NutritionChatState
-from app.agents.nutrition_chat.tools import confirmation_required_tools, mutation_tools, read_tools
+from app.agents.nutrition_chat.tools import search_food_catalog
 from app.agents.runtime_context import NutrientTrackerRuntimeContext
 from app.utils.logger import logger
 
 
 async def build_nutrition_chat_agent(
     config: RunnableConfig | None = None,
-    *,
-    allow_mutations: bool = True,
-    allow_nutrition_entry: bool = False,
 ):
     """Build the agent. Called once per invocation by the agent registry."""
+    register_action_executors()
     middleware = [
         ModelAndPromptMiddleware(  # MUST be first
             langsmith_prompt_name="nutrition-chat-v1",
@@ -39,11 +40,7 @@ async def build_nutrition_chat_agent(
         UserContextMiddleware(),
     ]
 
-    available_tools = read_tools
-    if allow_mutations:
-        available_tools = [*read_tools, *mutation_tools]
-        if allow_nutrition_entry:
-            available_tools.extend(confirmation_required_tools)
+    available_tools = [search_food_catalog, *snapshot_read_tools, *mutation_action_tools]
 
     agent = create_agent(
         model=resolve_model(),
@@ -51,7 +48,7 @@ async def build_nutrition_chat_agent(
         name="nutrition_chat",
         state_schema=NutritionChatState,
         context_schema=NutrientTrackerRuntimeContext,
-        response_format=AutoStrategy(ChatTurn),
+        response_format=AutoStrategy(ChatResponse),
         middleware=middleware,
     )
     agent = agent.with_config(recursion_limit=20)

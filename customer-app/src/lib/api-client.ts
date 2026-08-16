@@ -156,8 +156,10 @@ export const api = {
     request('/water', { method: 'POST', body: JSON.stringify({ volume_ml, logged_on }) }),
   water: (params: Record<string, unknown> = {}) => request<Page<WaterLog>>(`/water${qs(params)}`),
 
-  sendMessage: (form: FormData) =>
-    request<Message[]>('/messages', { method: 'POST', body: form }),
+  sendMessage: (form: FormData) => {
+    if (!form.has('timezone')) form.set('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
+    return request<Message[]>('/messages', { method: 'POST', body: form })
+  },
   messages: (params: Record<string, unknown> = {}) =>
     request<Page<Message>>(`/messages${qs(params)}`),
   confirmMessage: (id: string, body: MealDraftConfirmRequest) =>

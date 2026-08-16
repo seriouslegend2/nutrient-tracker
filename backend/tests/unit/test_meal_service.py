@@ -11,6 +11,7 @@ from app.api.v1.meals_router import MealCreateRequest
 from app.core.exceptions import ValidationError
 from app.domain.dishes.resolve import Resolution
 from app.domain.meals import service
+from app.domain.meals.servings import normalize_meal_servings
 
 
 async def test_portion_edit_re_resolves_the_current_household_serving(monkeypatch) -> None:
@@ -43,6 +44,39 @@ async def test_portion_edit_re_resolves_the_current_household_serving(monkeypatc
     assert resolution_calls[0]["portions"] == 2
     assert updated["portion_unit"] == "serving"
     assert updated["grams"] == 200
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(0.1, 0.5), (1.24, 1.0), (1.25, 1.5), (1.74, 1.5), (1.75, 2.0), (3, 3.0)],
+)
+def test_meal_servings_round_half_up_to_half_units(value: float, expected: float) -> None:
+    assert normalize_meal_servings(value) == expected
+
+
+async def test_prepare_item_normalizes_before_resolution(monkeypatch) -> None:
+    async def find_by_name(_name: str) -> None:
+        return None
+
+    captured: dict[str, Any] = {}
+
+    async def resolve(**kwargs: Any) -> Resolution:
+        captured.update(kwargs)
+        return Resolution("katori", 160, 240, {"protein_g": 24}, "category_global")
+
+    monkeypatch.setattr(service.dish_repo, "find_by_name", find_by_name)
+    monkeypatch.setattr(service, "resolve_item", resolve)
+
+    item = await service._prepare_item(
+        user_id="user-1",
+        meal_type="lunch",
+        dish_name="Dal",
+        grams=200,
+        portions=1.25,
+    )
+
+    assert captured["portions"] == 1.5
+    assert item["portions"] == 1.5
 
 
 async def test_generic_nutrition_entry_uses_slot_label_and_stated_values(monkeypatch) -> None:
@@ -118,6 +152,14 @@ def test_meal_request_accepts_food_id_or_stated_nutrients_without_a_name() -> No
     assert generic.nutrients == {"calories_kcal": 500}
 
 
+def test_meal_request_normalizes_servings() -> None:
+    request = MealCreateRequest(
+        meal_date="2026-08-16", meal_type="lunch", dish_name="Dal", portions=1.25
+    )
+
+    assert request.portions == 1.5
+
+
 async def test_unmatched_servings_remain_loggable_without_grams(monkeypatch) -> None:
     async def no_match(_name: str) -> None:
         return None
@@ -160,16 +202,6 @@ async def test_unmatched_meal_is_inserted_then_resolved_by_meal_id(monkeypatch) 
             updated_meal_id="meal-2",
         )
 
-    async def next_version(_user_id: str, _meal_date: Any) -> int:
-        return 1
-
-    day_calls = 0
-
-    async def get_day(_user_id: str, _meal_date: Any) -> list[dict[str, Any]]:
-        nonlocal day_calls
-        day_calls += 1
-        return []
-
     async def insert(row: dict[str, Any]) -> dict[str, Any]:
         return {"id": "meal-1", **row}
 
@@ -188,8 +220,6 @@ async def test_unmatched_meal_is_inserted_then_resolved_by_meal_id(monkeypatch) 
 
     monkeypatch.setattr(service.dish_repo, "find_by_name", no_match)
     monkeypatch.setattr(service, "run_manual_meal_resolver", match)
-    monkeypatch.setattr(service.repo, "next_day_version", next_version)
-    monkeypatch.setattr(service.repo, "get_day", get_day)
     monkeypatch.setattr(service.repo, "insert_meal", insert)
     monkeypatch.setattr(service.repo, "get_meal", get_meal)
 
@@ -201,10 +231,15 @@ async def test_unmatched_meal_is_inserted_then_resolved_by_meal_id(monkeypatch) 
         portions=2,
     )
 
-    assert day_calls == 1
     assert captured["meal_id"] == "meal-1"
     assert captured["servings"] == 2
     assert item["food_id"] == "dish-1"
     assert item["category"] == "protein_main"
     assert item["grams"] == 300
     assert item["nutrients"] == {"protein_g": 54}
+
+
+def test_exact_user_nutrition_does_not_add_unstated_calories() -> None:
+    assert service._normalise_supplied_nutrients(
+        {"protein_g": 50, "carbs_g": 330}, derive_calories=False
+    ) == {"protein_g": 50.0, "carbs_g": 330.0}

@@ -9,6 +9,7 @@ import { NutrientSpine } from '@/components/nutrient-spine'
 import { api, type Day, type Dish, type Meal } from '@/lib/api-client'
 import { inclusiveDateRange, isISODate, localDateISO, rollingDateWindow } from '@/lib/date'
 import { formatNutrientValue, otherNutrients, primaryNutrients, scaleNutrients } from '@/lib/nutrients'
+import { hasPositiveMealServings, normalizeMealServings } from '@/lib/servings'
 
 const SLOTS = ['breakfast', 'brunch', 'lunch', 'snacks', 'dinner', 'misc'] as const
 type MealSlot = (typeof SLOTS)[number]
@@ -243,20 +244,23 @@ function ManualMealForm({ date, initialSlot, onCancel, onCreated }: {
   useEffect(() => {
     if (resolved.data) setPortionUnit(resolved.data.portion_unit)
   }, [resolved.data])
-  const previewGrams = (resolved.data?.portion_grams ?? selectedDish?.portion_grams ?? 0) * Number(portions || 0)
+  const servingCount = hasPositiveMealServings(portions)
+    ? normalizeMealServings(Number(portions))
+    : 0
+  const previewGrams = (resolved.data?.portion_grams ?? selectedDish?.portion_grams ?? 0) * servingCount
   const previewNutrients = scaleNutrients(
     resolved.data?.nutrients_per_unit ?? selectedDish?.nutrients_per_unit ?? {},
-    Number(portions || 0)
+    servingCount
   )
 
   const create = useMutation({
     mutationFn: () => api.logMeal({ meal_date: date, meal_type: slot,
       dish_name: search.trim(), food_id: selectedDish?.dish_id,
-      portions: Number(portions),
+      portions: servingCount,
       portion_unit: selectedDish ? portionUnit : undefined }),
     onSuccess: onCreated,
   })
-  const invalid = !search.trim() || !portions || Number(portions) <= 0
+  const invalid = !search.trim() || !hasPositiveMealServings(portions)
 
   return <section aria-labelledby="manual-meal-heading" className="card mb-4 p-5 sm:p-6">
     <div className="mb-4 flex items-center justify-between"><h2 id="manual-meal-heading" className="display-title text-2xl">Add manually</h2>
@@ -294,12 +298,14 @@ function ManualMealForm({ date, initialSlot, onCancel, onCreated }: {
       Your resolved portion: {resolved.data.portion_grams ?? 'unknown'} g per {resolved.data.portion_unit} · {PROVENANCE[resolved.data.resolved_from] ?? resolved.data.resolved_from}
     </p>}
     <div className="mt-3">
-      <label className="text-sm">Servings<input type="number" min="0.1" step="0.1" value={portions}
-        onChange={(e) => setPortions(e.target.value)} className="input mt-1" /></label>
+      <label className="text-sm">Servings<input type="number" min="0.5" step="0.5" value={portions}
+        onChange={(e) => setPortions(e.target.value)}
+        onBlur={() => hasPositiveMealServings(portions) && setPortions(String(servingCount))}
+        className="input mt-1" /></label>
     </div>
     {selectedDish && resolved.data && previewGrams > 0 && <div className="mt-3 rounded-2xl p-4" style={{ background: 'var(--color-surface-soft)' }}>
       <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-tx2)' }}>
-        Estimated for {formatNutrientValue(Number(portions))} {Number(portions) === 1 ? 'serving' : 'servings'} · {formatNutrientValue(previewGrams)} g
+        Estimated for {formatNutrientValue(servingCount)} {servingCount === 1 ? 'serving' : 'servings'} · {formatNutrientValue(previewGrams)} g
       </p>
       <NutrientSummary nutrients={previewNutrients} className="mt-2 text-sm font-semibold" />
       <OtherNutrients nutrients={previewNutrients} />
@@ -339,7 +345,7 @@ function MealRow({ item, onChange }: { item: Meal; onChange: () => void }) {
   const unknown = !item.nutrients || Object.keys(item.nutrients).length === 0
   const update = useMutation({
     mutationFn: () => api.adjustMeal(item.id, {
-      portions: Number(portions),
+      portions: normalizeMealServings(Number(portions)),
     }),
     onSuccess: () => { setEditing(false); onChange() },
   })
@@ -362,9 +368,9 @@ function MealRow({ item, onChange }: { item: Meal; onChange: () => void }) {
       <p>Portion: {PROVENANCE[item.resolved_from] ?? item.resolved_from}{item.source !== 'manual' && ` · logged by ${item.source}`}</p>
       {editing ? <div className="mt-3 rounded-2xl border p-4" style={{ borderColor: 'var(--color-line)', background: 'var(--color-surface-soft)' }}>
         <p className="mb-2 text-xs">This changes only this meal. Your usual household portion stays the same.</p>
-        <label>Servings<input className="input mt-1" type="number" min="0.1" step="0.1" value={portions} onChange={(e) => setPortions(e.target.value)} /></label>
+        <label>Servings<input className="input mt-1" type="number" min="0.5" step="0.5" value={portions} onChange={(e) => setPortions(e.target.value)} onBlur={() => hasPositiveMealServings(portions) && setPortions(String(normalizeMealServings(Number(portions))))} /></label>
         {update.error && <p className="mt-2" style={{ color: 'var(--color-danger)' }}>{update.error.message}</p>}
-        <div className="mt-3 flex gap-2"><button className="action-button" disabled={!portions || Number(portions) <= 0 || update.isPending} onClick={() => update.mutate()}>Save</button>
+        <div className="mt-3 flex gap-2"><button className="action-button" disabled={!hasPositiveMealServings(portions) || update.isPending} onClick={() => update.mutate()}>Save</button>
           <button className="action-button-secondary" onClick={() => setEditing(false)}>Cancel</button></div>
       </div> : <div className="mt-3 flex gap-2"><button className="action-button" onClick={() => setEditing(true)}>Edit this meal</button>
         <button className="action-button-danger" disabled={remove.isPending} onClick={() => window.confirm(`Remove ${item.dish_name}?`) && remove.mutate()}>{remove.isPending ? 'Removing…' : 'Remove'}</button></div>}

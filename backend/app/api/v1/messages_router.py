@@ -12,9 +12,10 @@ reference, the raw output and a status the message needs anyway.
 
 from __future__ import annotations
 
-import json
+import asyncio
 from datetime import date
 from typing import Any, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -24,8 +25,12 @@ from app.agents.nutrition_chat.runner import run_nutrition_chat_agent
 from app.core.deps import CurrentUser, get_current_user
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.pagination import Page, PaginationParams, pagination
+from app.domain.agent_actions import service as action_service
+from app.domain.agent_actions.models import public_action
 from app.domain.dishes import repository as dish_repo
+from app.domain.meals import repository as meals_repo
 from app.domain.meals import service as meals_service
+from app.domain.meals.servings import MealServings
 from app.domain.messages import repository as message_repo
 from app.services.media_meal_draft import build_media_meal_draft
 from app.services.speech_to_text import transcribe_audio, validate_audio_upload
@@ -67,7 +72,7 @@ class ConfirmationItem(BaseModel):
     evidence_id: str | None = None
     food_id: str | None = None
     grams: float | None = Field(None, gt=0)
-    portions: float = Field(1.0, gt=0)
+    portions: MealServings = Field(1.0, le=100)
     portion_unit: str | None = None
     confidence: str | None = None
 
@@ -97,20 +102,42 @@ class ConfirmRequest(BaseModel):
 
 def _agent_messages(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
     """Convert persisted thread rows into the model's conversation format."""
+    failed_correlations = {
+        str(row.get("correlation_id"))
+        for row in rows
+        if row.get("status") == "failed" and row.get("correlation_id")
+    }
+    media_correlations = {
+        str(row.get("correlation_id"))
+        for row in rows
+        if row.get("msg_type") in {"image", "pdf"}
+        or (row.get("payload") or {}).get("workflow") == "media"
+    }
     messages: list[dict[str, str]] = []
     for row in rows:
-        if row.get("status") == "failed":
+        correlation_id = str(row.get("correlation_id"))
+        if correlation_id in failed_correlations:
+            continue
+        if correlation_id in media_correlations:
+            payload = row.get("payload") or {}
+            if row.get("msg_type") in {"image", "pdf"} and payload.get("workflow") == "media":
+                item_names = [
+                    str(item.get("resolved_name") or item.get("name"))
+                    for item in (payload.get("items") or [])[:20]
+                    if isinstance(item, dict) and (item.get("resolved_name") or item.get("name"))
+                ]
+                names = ", ".join(item_names) if item_names else "none"
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": (
+                            f"[Trusted media meal-draft status: {row.get('status', 'unknown')}; "
+                            f"resolved items: {names}.]"
+                        ),
+                    }
+                )
             continue
         content = row.get("msg_text") or ""
-        payload = row.get("payload") or {}
-        if (
-            row.get("direction") == "inbound"
-            and row.get("status") == "needs_confirmation"
-            and payload
-        ):
-            content += "\n\nStructured media draft (not yet confirmed): " + json.dumps(
-                payload, separators=(",", ":")
-            )
         if content:
             messages.append(
                 {
@@ -119,6 +146,64 @@ def _agent_messages(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
                 }
             )
     return messages
+
+
+def _compact_media_draft(payload: dict[str, Any]) -> dict[str, Any]:
+    """Expose only bounded resolved draft facts to the chat orchestrator."""
+    source = payload.get("source_metadata") or {}
+    items = payload.get("items") or []
+    visible = [item for item in items if isinstance(item, dict)][:20]
+    return {
+        "status": "needs_confirmation",
+        "meal_date": payload.get("meal_date"),
+        "meal_type": payload.get("meal_type"),
+        "source_kind": source.get("kind"),
+        "media_kind": source.get("media_kind"),
+        "confidence": payload.get("confidence"),
+        "items": [
+            {
+                "name": item.get("name"),
+                "resolved_name": item.get("resolved_name"),
+                "category": item.get("category"),
+                "servings": item.get("servings"),
+                "portion_unit": item.get("portion_unit")
+                or (item.get("portion_metadata") or {}).get("portion_unit"),
+                "total_grams": item.get("total_grams"),
+                "nutrients": item.get("nutrients") or {},
+                "confidence": item.get("confidence"),
+            }
+            for item in visible
+        ],
+        "coverage": {
+            "items_available": len(items),
+            "items_included": len(visible),
+            "truncated": len(items) > len(visible),
+        },
+    }
+
+
+async def _hydrate_agent_actions(user_id: str, row: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(row.get("payload") or {})
+    snapshots = payload.get("agent_actions")
+    if not isinstance(snapshots, list):
+        return row
+    stored_actions = [item for item in snapshots if isinstance(item, dict) and item.get("id")]
+    if not stored_actions:
+        return row
+
+    async def load(action_id: str) -> dict[str, Any] | None:
+        try:
+            action = await action_service.get(user_id=user_id, action_id=UUID(action_id))
+            return public_action(action).model_dump(mode="json")
+        except Exception as exc:
+            logger.warning(
+                "agent_action_hydration_failed action_id={} error={}", action_id, str(exc)
+            )
+            return None
+
+    loaded = await asyncio.gather(*(load(str(item["id"])) for item in stored_actions))
+    current = [fresh or stored for fresh, stored in zip(loaded, stored_actions, strict=True)]
+    return {**row, "payload": {**payload, "agent_actions": current}}
 
 
 async def _failure_reply(
@@ -148,6 +233,7 @@ async def send_message(
     user: CurrentUser = Depends(get_current_user),
     text: str | None = Form(None),
     thread_id: str | None = Form(None),
+    timezone: str = Form("UTC"),
     file: UploadFile | None = File(None),
 ) -> list[MessageResponse]:
     """Route text and transcribed audio to chat; route visual media to review."""
@@ -251,6 +337,7 @@ async def send_message(
         draft_payload.setdefault("source_metadata", {}).update(
             {"mime_type": mime, "filename": file.filename}
         )
+        draft_payload["workflow"] = "media"
         updated = await message_repo.update_message(
             user_id=user.id,
             message_id=inbound["id"],
@@ -262,11 +349,35 @@ async def send_message(
         )
         if not updated:
             raise NotFoundError("Message not found", code="MESSAGE_NOT_FOUND")
-        item_count = len(draft_payload.get("items") or [])
-        review_text = (
-            f"I prepared {item_count} item{'s' if item_count != 1 else ''} from the "
-            "attachment. Review and edit the meal draft before confirming."
+        logger.info(
+            "message_processed user_id={} type={} status=needs_confirmation", user.id, mtype
         )
+        history = await message_repo.list_thread_messages(
+            user_id=user.id, thread_id=inbound["thread_id"]
+        )
+        history = await asyncio.gather(*(_hydrate_agent_actions(user.id, row) for row in history))
+        chat_messages = _agent_messages(history)
+        chat_messages.append(
+            {
+                "role": "user",
+                "content": normalized_text or f"I uploaded a {mtype} for meal-draft review.",
+            }
+        )
+        try:
+            turn = await run_nutrition_chat_agent(
+                user_id=user.id,
+                thread_id=inbound["thread_id"],
+                messages=chat_messages,
+                pending_media_draft=_compact_media_draft(draft_payload),
+                correlation_id=inbound["correlation_id"],
+                timezone=timezone,
+                source_message_id=inbound["id"],
+                auto_execute_actions=False,
+            )
+            summary = turn.reply
+        except Exception as exc:
+            logger.exception("media_chat_summary_failed user_id={} error={}", user.id, str(exc))
+            summary = "Your meal draft is ready. Review the detected items before confirming."
         reply = await message_repo.create_message(
             {
                 "user_id": user.id,
@@ -274,12 +385,14 @@ async def send_message(
                 "correlation_id": inbound["correlation_id"],
                 "direction": "outbound",
                 "msg_type": "text",
-                "msg_text": review_text,
-                "payload": {"needs_confirmation": True},
+                "msg_text": summary,
+                "payload": {
+                    "workflow": "media_summary",
+                    "draft_message_id": updated["id"],
+                },
                 "status": "not_applicable",
             }
         )
-        logger.info("message_processed user_id={} type={} status=needs_confirmation", user.id, mtype)
         return [MessageResponse(**updated), MessageResponse(**reply)]
 
     if file and mtype == "audio":
@@ -294,7 +407,9 @@ async def send_message(
                 mime_type=mime,
                 filename=file.filename,
             )
-            normalized_text = transcription.text
+            transcript = transcription.text.strip()
+            note = normalized_text
+            normalized_text = f"{note}\n\nVoice transcript: {transcript}" if note else transcript
         except Exception as exc:
             logger.exception("audio_transcription_failed user_id={} error={}", user.id, str(exc))
             return await _failure_reply(
@@ -318,13 +433,17 @@ async def send_message(
     history = await message_repo.list_thread_messages(
         user_id=user.id, thread_id=inbound["thread_id"]
     )
+    history = await asyncio.gather(*(_hydrate_agent_actions(user.id, row) for row in history))
     try:
         turn = await run_nutrition_chat_agent(
             user_id=user.id,
             thread_id=inbound["thread_id"],
             messages=_agent_messages(history),
-            extraction_payload={},
+            pending_media_draft=None,
             correlation_id=inbound["correlation_id"],
+            timezone=timezone,
+            source_message_id=inbound["id"],
+            auto_execute_actions=True,
         )
     except Exception as exc:
         logger.exception("nutrition_agent_failed user_id={} error={}", user.id, str(exc))
@@ -344,7 +463,8 @@ async def send_message(
             "msg_text": turn.reply,
             "payload": {
                 "tool_calls": [call.model_dump() for call in turn.tool_calls],
-                "needs_confirmation": turn.needs_confirmation,
+                "needs_confirmation": bool(turn.agent_actions),
+                "agent_actions": turn.agent_actions,
             },
             "status": "not_applicable",
         }
@@ -365,7 +485,8 @@ async def list_messages(
         limit=params.page_size,
         thread_id=thread_id,
     )
-    return Page.build([MessageResponse(**m) for m in rows], total, params)
+    hydrated = await asyncio.gather(*(_hydrate_agent_actions(user.id, row) for row in rows))
+    return Page.build([MessageResponse(**m) for m in hydrated], total, params)
 
 
 @router.get("/{message_id}", response_model=MessageResponse)
@@ -375,7 +496,7 @@ async def get_message(
     message = await message_repo.get_message(user.id, message_id)
     if not message:
         raise NotFoundError("Message not found", code="MESSAGE_NOT_FOUND")
-    return MessageResponse(**message)
+    return MessageResponse(**(await _hydrate_agent_actions(user.id, message)))
 
 
 @router.post("/{message_id}/discard", status_code=204)
@@ -386,16 +507,14 @@ async def discard_message(
     message = await message_repo.get_message(user.id, message_id)
     if not message:
         raise NotFoundError("Message not found", code="MESSAGE_NOT_FOUND")
-    if message["status"] == "confirmed":
-        raise ConflictError(
-            "This draft has already been logged.", code="MESSAGE_ALREADY_CONFIRMED"
-        )
-    if message["status"] == "needs_confirmation":
-        await message_repo.update_message(
-            user_id=user.id,
-            message_id=message_id,
-            patch={"status": "not_applicable"},
-        )
+    try:
+        await meals_repo.discard_media_draft(user_id=user.id, message_id=message_id)
+    except Exception as exc:
+        if "message_already_confirmed" in str(exc):
+            raise ConflictError(
+                "This draft has already been logged.", code="MESSAGE_ALREADY_CONFIRMED"
+            ) from exc
+        raise
     return Response(status_code=204)
 
 
@@ -410,6 +529,10 @@ async def confirm_message(
     message = await message_repo.get_message(user.id, message_id)
     if not message:
         raise NotFoundError("Message not found", code="MESSAGE_NOT_FOUND")
+    if message["status"] == "confirmed":
+        confirmation_result = (message.get("payload") or {}).get("confirmation_result")
+        if isinstance(confirmation_result, dict):
+            return confirmation_result
     if message["status"] != "needs_confirmation":
         raise ConflictError(
             "This message has already been confirmed or has no draft.",
@@ -443,16 +566,21 @@ async def confirm_message(
 
     draft_items = (message.get("payload") or {}).get("items", [])
     draft_by_evidence = {
-        str(item["evidence_id"]): item
-        for item in draft_items
-        if item.get("evidence_id")
+        str(item["evidence_id"]): item for item in draft_items if item.get("evidence_id")
     }
     evidence_ids = [item.evidence_id for item in items if item.evidence_id]
     if len(evidence_ids) != len(set(evidence_ids)):
-        raise ValidationError("A draft item can be confirmed only once.", code="DUPLICATE_DRAFT_ITEM")
+        raise ValidationError(
+            "A draft item can be confirmed only once.", code="DUPLICATE_DRAFT_ITEM"
+        )
 
     resolved_items: list[dict[str, Any]] = []
     for item in items:
+        if not item.evidence_id:
+            raise ValidationError(
+                "Only items from the stored media draft can be confirmed.",
+                code="DRAFT_ITEM_REQUIRED",
+            )
         stored = draft_by_evidence.get(item.evidence_id or "") if item.evidence_id else None
         if item.evidence_id and stored is None:
             raise ValidationError(
@@ -484,16 +612,13 @@ async def confirm_message(
                     "confidence": stored.get("confidence") or item.confidence,
                 }
             )
-        else:
-            resolved_items.append(item.model_dump())
-
-    created = []
     source_kind = ((message.get("payload") or {}).get("source_metadata") or {}).get("kind")
     source = {
         "food_photo": "photo",
         "nutrition_label": "label",
         "food_diary_pdf": "pdf_import",
     }.get(source_kind, "photo" if message["msg_type"] == "image" else "pdf_import")
+    prepared_items: list[dict[str, Any]] = []
     for item in resolved_items:
         if item.get("food_id") and not await dish_repo.get_dish(item["food_id"]):
             raise ValidationError(
@@ -503,11 +628,9 @@ async def confirm_message(
                 context={"food_id": item["food_id"]},
             )
 
-    for item in resolved_items:
-        created.append(
-            await meals_service.add_item(
+        prepared_items.append(
+            await meals_service.prepare_item(
                 user_id=user.id,
-                meal_date=body.meal_date,
                 meal_type=body.meal_type,
                 dish_name=item["dish_name"],
                 food_id=item.get("food_id"),
@@ -518,12 +641,14 @@ async def confirm_message(
                 confidence=item.get("confidence"),
             )
         )
-
-    await message_repo.update_message(
+    result = await meals_repo.confirm_media_draft(
         user_id=user.id,
         message_id=message_id,
-        patch={"status": "confirmed"},
+        meal_date=body.meal_date,
+        meal_type=body.meal_type,
+        items=prepared_items,
     )
+    created = result.get("meals") or []
     await message_repo.create_message(
         {
             "user_id": user.id,
@@ -535,30 +660,4 @@ async def confirm_message(
             "status": "not_applicable",
         }
     )
-    try:
-        await message_repo.create_audit_record(
-            {
-                "entity": "meal",
-                "entity_id": created[0].get("id") if created else None,
-                "user_id": user.id,
-                "action": "CREATE",
-                "new_value": {
-                    "message_id": message_id,
-                    "meal_date": body.meal_date.isoformat(),
-                    "meal_type": body.meal_type,
-                    "meal_ids": [meal.get("id") for meal in created],
-                    "item_count": len(created),
-                    "source": source,
-                },
-                "actor": user.id,
-                "source": "api",
-            }
-        )
-    except Exception as exc:
-        logger.warning(
-            "meal_import_audit_failed user_id={} message_id={} error={}",
-            user.id,
-            message_id,
-            str(exc),
-        )
-    return {"created": len(created), "meals": created}
+    return {"created": int(result.get("created") or len(created)), "meals": created}

@@ -43,7 +43,8 @@ Rules:
   basis and serving_size_g. Do not invent zero for a nutrient the label omits; copy every declared
   macro and micronutrient that the tool schema supports.
 - Agent 1 quantity is authoritative. Never change, replace, rank, or re-estimate its value, unit, or
-  total_grams. Application code converts that quantity into fixed servings.
+  total_grams. Application code converts that evidence into review servings rounded half-up to the
+  nearest 0.5, with a minimum of 0.5; the raw observed quantity remains preserved as evidence.
 - Never output meal grams, servings, nutrients, calories, or invented IDs. One-unit nutrients are
   tool input only when creating a missing global dish.
 - You may resolve identity for a draft, but you must never insert, update, or delete a customer's

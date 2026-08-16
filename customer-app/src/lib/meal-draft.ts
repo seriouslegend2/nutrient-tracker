@@ -2,6 +2,7 @@ import type {
   MealDraftConfirmRequest,
   MediaMealDraftItem,
 } from '@/lib/api-client'
+import { normalizeMealServings } from '@/lib/servings'
 
 export type MealDraftReviewItem = {
   id: string
@@ -48,7 +49,7 @@ export function parseMediaMealDraft(payload: unknown): ParsedMealDraft | null {
 }
 
 export function mealDraftItemGrams(item: MealDraftReviewItem): number {
-  return round(item.servings * item.gramsPerServing)
+  return round(normalizeMealServings(item.servings) * item.gramsPerServing)
 }
 
 export function calculateMealDraftTotals(items: MealDraftReviewItem[]): {
@@ -60,7 +61,9 @@ export function calculateMealDraftTotals(items: MealDraftReviewItem[]): {
 
   for (const item of items) {
     totalGrams += mealDraftItemGrams(item)
-    const scale = item.baseServings > 0 ? item.servings / item.baseServings : 1
+    const scale = item.baseServings > 0
+      ? normalizeMealServings(item.servings) / item.baseServings
+      : 1
     for (const [key, value] of Object.entries(item.nutrients)) {
       nutrients[key] = (nutrients[key] ?? 0) + value * scale
     }
@@ -87,7 +90,7 @@ export function buildMealDraftConfirmRequest(
       dish_name: item.resolvedName,
       food_id: item.foodId,
       grams: mealDraftItemGrams(item),
-      portions: item.servings,
+      portions: normalizeMealServings(item.servings),
       portion_unit: item.servingUnit,
       ...(item.confidence ? { confidence: item.confidence } : {}),
     })),
@@ -109,11 +112,13 @@ function parseItem(value: unknown, index: number): MealDraftReviewItem | null {
   }
 
   const totalGrams = firstPositive(item.total_grams, item.estimated_mass_g)
-  const servings = firstPositive(
+  const rawServings = firstPositive(
     item.servings,
     item.portions,
     totalGrams != null ? totalGrams / gramsPerServing : null,
   ) ?? 1
+  const servings = normalizeMealServings(rawServings)
+  const servingScale = servings / rawServings
 
   return {
     id: `${index}-${evidenceId}`,
@@ -128,7 +133,12 @@ function parseItem(value: unknown, index: number): MealDraftReviewItem | null {
     confidence: parseConfidence(item.confidence),
     amountSource: firstString(item.amount_source),
     foodId,
-    nutrients: parseNutrients(value),
+    nutrients: Object.fromEntries(
+      Object.entries(parseNutrients(value)).map(([key, nutrient]) => [
+        key,
+        round(nutrient * servingScale),
+      ])
+    ),
   }
 }
 

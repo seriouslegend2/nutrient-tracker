@@ -26,6 +26,7 @@ from app.core.exceptions import NotFoundError
 from app.core.pagination import Page, PaginationParams, decode_cursor, encode_cursor, pagination
 from app.domain.meals import repository as repo
 from app.domain.meals import service
+from app.domain.meals.servings import MealServings
 
 router = APIRouter(prefix="/meals", tags=["meals"])
 
@@ -57,7 +58,11 @@ class MealCreateRequest(BaseModel):
     meal_type: str = Field(..., description="breakfast|brunch|lunch|snacks|dinner|misc")
     dish_name: str | None = Field(None, min_length=1)
     food_id: str | None = Field(None, description="Optional: free text is first-class")
-    portions: float = Field(1.0, gt=0, description="The multiplier: 1.5 katori, 3 rotis")
+    portions: MealServings = Field(
+        1.0,
+        le=100,
+        description="Fixed-unit multiplier, normalized to the nearest 0.5 serving",
+    )
     grams: float | None = Field(None, ge=0, description="Overrides the lookup chain")
     portion_unit: str | None = None
     slot_time: str | None = None
@@ -72,7 +77,7 @@ class MealCreateRequest(BaseModel):
 
 
 class MealPatchRequest(BaseModel):
-    portions: float | None = Field(None, gt=0)
+    portions: MealServings | None = Field(None, le=100)
     portion_unit: str | None = None
     grams: float | None = Field(None, ge=0)
 
@@ -81,7 +86,7 @@ class DayItemRequest(BaseModel):
     meal_type: str
     dish_name: str | None = None
     food_id: str | None = None
-    portions: float = 1.0
+    portions: MealServings = Field(1.0, le=100)
     grams: float | None = None
     portion_unit: str | None = None
     slot_time: str | None = None

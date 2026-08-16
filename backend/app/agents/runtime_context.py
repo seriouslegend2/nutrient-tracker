@@ -9,3 +9,4 @@ from dataclasses import dataclass
 class NutrientTrackerRuntimeContext:
     user_id: str
     thread_id: str | None = None
+    timezone: str = "UTC"

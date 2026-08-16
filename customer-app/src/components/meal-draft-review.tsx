@@ -14,6 +14,7 @@ import {
   type MealDraftReviewItem,
 } from '@/lib/meal-draft'
 import { isMealSlot, MEAL_SLOT_OPTIONS, suggestedMealSlot } from '@/lib/meal-slots'
+import { normalizeMealServings } from '@/lib/servings'
 
 type MealDraftReviewProps = {
   messageId: string
@@ -167,9 +168,9 @@ function DraftItem({ item, onChange, onRemove }: {
   onChange: (item: MealDraftReviewItem) => void
   onRemove: () => void
 }) {
-  const step = 0.25
+  const step = 0.5
   const adjust = (delta: number) => {
-    const servings = Math.max(step, Math.round((item.servings + delta) * 100) / 100)
+    const servings = normalizeMealServings(item.servings + delta)
     onChange({ ...item, servings })
   }
   const hasNutrition = Object.keys(item.nutrients).length > 0
@@ -203,7 +204,7 @@ function DraftItem({ item, onChange, onRemove }: {
               onChange={(event) => {
                 const servings = Number(event.target.value)
                 if (Number.isFinite(servings) && servings > 0) onChange({ ...item, servings })
-              }} />
+              }} onBlur={() => onChange({ ...item, servings: normalizeMealServings(item.servings) })} />
             <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs">{item.servingUnit}</span>
           </div>
         </label>

@@ -2,80 +2,18 @@
 
 from __future__ import annotations
 
-import re
+import json
 import time
 from typing import Any
 
-from app.agents.nutrition_chat.models import ChatTurn
+from langchain_core.messages import ToolMessage
+
+from app.agents.nutrition_chat.models import ChatResponse, ChatTurn, ToolCallSummary
 from app.agents.runtime_context import NutrientTrackerRuntimeContext
 from app.config.settings import settings
 from app.domain.messages import repository as message_repo
 from app.services.prompts import trace_agent
 from app.utils.logger import logger
-
-_EXPLICIT_MUTATION = re.compile(
-    r"^\s*(?:please\s+)?(?:log|add|record|remove|delete|set|change|update|correct)\b",
-    re.IGNORECASE,
-)
-_EXPLICIT_CONFIRMATIONS = {
-    "yes",
-    "yes please",
-    "confirm",
-    "confirmed",
-    "go ahead",
-    "yes go ahead",
-    "yes, go ahead",
-    "do it",
-    "please do",
-}
-_NUMERIC_NUTRITION_PROPOSAL = re.compile(
-    r"\b\d+(?:\.\d+)?\s*(?:kcal|calories?|g|grams?)\b", re.IGNORECASE
-)
-
-
-def _allow_mutations(messages: list[dict[str, str]], payload: dict[str, Any]) -> bool:
-    """Ambiguous meal text is read-only until the user gives an explicit instruction."""
-    if payload:
-        return False
-    latest = next(
-        (
-            message.get("content", "")
-            for message in reversed(messages)
-            if message.get("role") == "user"
-        ),
-        "",
-    )
-    normalized = latest.strip().lower().rstrip(".!?")
-    if _EXPLICIT_MUTATION.search(latest):
-        return True
-    has_prior_assistant = any(message.get("role") == "assistant" for message in messages[:-1])
-    return has_prior_assistant and normalized in _EXPLICIT_CONFIRMATIONS
-
-
-def _confirmed_follow_up(messages: list[dict[str, str]], payload: dict[str, Any]) -> bool:
-    """Numeric nutrient writes require a separate confirmation turn."""
-    if payload:
-        return False
-    latest = next(
-        (
-            message.get("content", "")
-            for message in reversed(messages)
-            if message.get("role") == "user"
-        ),
-        "",
-    )
-    normalized = latest.strip().lower().rstrip(".!?")
-    prior_assistant = next(
-        (
-            message.get("content", "")
-            for message in reversed(messages[:-1])
-            if message.get("role") == "assistant"
-        ),
-        "",
-    )
-    return normalized in _EXPLICIT_CONFIRMATIONS and bool(
-        _NUMERIC_NUTRITION_PROPOSAL.search(prior_assistant)
-    )
 
 
 def _usage(result: dict[str, Any]) -> tuple[int | None, int | None, float | None]:
@@ -110,51 +48,182 @@ async def _record_run(row: dict[str, Any]) -> None:
         logger.warning("agent_run_persist_failed agent=nutrition_chat error={}", str(exc))
 
 
+def _action_payload(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(value, dict):
+        return None
+    candidate = value.get("agent_action")
+    if not isinstance(candidate, dict):
+        return None
+    if not all(candidate.get(key) for key in ("id", "action_type", "summary", "status")):
+        return None
+    return {
+        key: candidate.get(key)
+        for key in (
+            "id",
+            "user_id",
+            "action_type",
+            "summary",
+            "status",
+            "expires_at",
+            "confirmed_at",
+            "execution_started_at",
+            "completed_at",
+            "result",
+            "error",
+            "created_at",
+            "updated_at",
+        )
+    }
+
+
+def _executed_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
+    actions: dict[str, dict[str, Any]] = {}
+    for message in result.get("messages") or []:
+        if not isinstance(message, ToolMessage):
+            continue
+        candidates: list[Any] = [message.content, getattr(message, "artifact", None)]
+        if isinstance(message.content, list):
+            candidates.extend(
+                block.get("text") if isinstance(block, dict) else block for block in message.content
+            )
+        for value in candidates:
+            action = _action_payload(value)
+            if action:
+                actions[str(action["id"])] = action
+    return list(actions.values())
+
+
+def _executed_tool_calls(result: dict[str, Any]) -> list[ToolCallSummary]:
+    calls: list[ToolCallSummary] = []
+    for message in result.get("messages") or []:
+        if not isinstance(message, ToolMessage):
+            continue
+        action = _action_payload(message.content)
+        detail = (
+            {
+                "action_id": action["id"],
+                "action_type": action["action_type"],
+                "action_status": action["status"],
+            }
+            if action
+            else {}
+        )
+        calls.append(
+            ToolCallSummary(
+                tool=message.name or "unknown",
+                status="ERROR" if getattr(message, "status", "success") == "error" else "OK",
+                detail=detail,
+            )
+        )
+    return calls
+
+
 async def run_nutrition_chat_agent(
     *,
     user_id: str,
     thread_id: str,
     messages: list[dict[str, str]],
-    extraction_payload: dict[str, Any] | None = None,
+    pending_media_draft: dict[str, Any] | None = None,
     correlation_id: str | None = None,
+    timezone: str = "UTC",
+    source_message_id: str | None = None,
+    auto_execute_actions: bool = True,
 ) -> ChatTurn:
     """Run one authenticated chat turn and normalize its structured response."""
     started = time.perf_counter()
-    payload = extraction_payload or {}
-    config = {"configurable": {"user_id": user_id, "thread_id": thread_id}}
-    context = NutrientTrackerRuntimeContext(user_id=user_id, thread_id=thread_id)
-    allow_mutations = _allow_mutations(messages, payload)
+    payload = pending_media_draft or {}
+    config = {
+        "configurable": {
+            "user_id": user_id,
+            "thread_id": thread_id,
+            "timezone": timezone,
+            "source_message_id": source_message_id,
+            "auto_execute_actions": auto_execute_actions,
+        }
+    }
+    context = NutrientTrackerRuntimeContext(
+        user_id=user_id,
+        thread_id=thread_id,
+        timezone=timezone,
+    )
     try:
         from app.agents.nutrition_chat.agent import build_nutrition_chat_agent
 
-        agent = await build_nutrition_chat_agent(
-            allow_mutations=allow_mutations,
-            allow_nutrition_entry=_confirmed_follow_up(messages, payload),
-        )
-        with trace_agent("nutrition_chat", {"allow_mutations": allow_mutations}):
+        agent = await build_nutrition_chat_agent()
+        trace_inputs = {
+            "user_id": user_id,
+            "thread_id": thread_id,
+            "correlation_id": correlation_id,
+            "source_message_id": source_message_id,
+            "timezone": timezone,
+            "messages": messages,
+            "pending_media_draft": payload or None,
+        }
+        with trace_agent(
+            "nutrition_chat",
+            {
+                "correlation_id": correlation_id,
+                "model": settings.ORCHESTRATION_MODEL,
+                "thread_id": thread_id,
+                "user_id": user_id,
+            },
+            inputs=trace_inputs,
+        ) as trace_run:
             result = await agent.ainvoke(
                 {
                     "messages": messages,
                     "user_id": user_id,
-                    "user_profile": "",
-                    "active_goal": "",
-                    "preferences": "",
-                    "extraction_payload": payload,
+                    "pending_media_draft": json.dumps(
+                        payload or None,
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
                 },
                 config=config,
                 context=context,
             )
-        response = result.get("structured_response")
-        if response is None:
-            raise RuntimeError("Nutrition agent returned no structured response")
-        turn = response if isinstance(response, ChatTurn) else ChatTurn.model_validate(response)
+            response = result.get("structured_response")
+            if response is None:
+                raise RuntimeError("Nutrition agent returned no structured response")
+            model_response = (
+                response
+                if isinstance(response, ChatResponse)
+                else ChatResponse.model_validate(response)
+            )
+            actions = _executed_actions(result)
+            reply = model_response.reply
+            completed_actions = [action for action in actions if action.get("status") == "completed"]
+            failed_actions = [action for action in actions if action.get("status") == "failed"]
+            if auto_execute_actions and failed_actions:
+                reply = "I couldn't apply that change, so your tracker was not updated."
+            pending_actions = [action for action in actions if action.get("status") == "proposed"]
+            if auto_execute_actions and actions and len(completed_actions) != len(actions):
+                logger.warning(
+                    "nutrition_chat_action_not_completed user_id={} correlation_id={}",
+                    user_id,
+                    correlation_id,
+                )
+            turn = ChatTurn(
+                reply=reply,
+                tool_calls=_executed_tool_calls(result),
+                needs_confirmation=bool(pending_actions),
+                agent_actions=actions,
+            )
+            if trace_run is not None:
+                trace_run.add_outputs(turn.model_dump(mode="json"))
     except Exception as exc:
         await _record_run(
             {
                 "user_id": user_id,
                 "correlation_id": correlation_id,
                 "agent_name": "nutrition_chat",
-                "model": settings.CHAT_MODEL,
+                "model": settings.ORCHESTRATION_MODEL,
                 "duration_ms": round((time.perf_counter() - started) * 1000),
                 "status": "failed",
                 "error_message": str(exc),
@@ -168,7 +237,7 @@ async def run_nutrition_chat_agent(
             "user_id": user_id,
             "correlation_id": correlation_id,
             "agent_name": "nutrition_chat",
-            "model": settings.CHAT_MODEL,
+            "model": settings.ORCHESTRATION_MODEL,
             "duration_ms": round((time.perf_counter() - started) * 1000),
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,

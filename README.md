@@ -125,6 +125,8 @@ cp internal-dashboard/.env.example internal-dashboard/.env.local
   hydration remain usable without it; unmatched meals stay honestly unresolved,
   media reports that AI is disabled, and the chat assistant cannot complete turns.
   `DEMO_KEY` is suitable for development only.
+- `ORCHESTRATION_MODEL` defaults to `gpt-5.4` for the top-level nutrition chat.
+  Specialist extraction and food-resolution models remain independently configurable.
 - `MANUAL_RESOLVER_MODEL` defaults to `gpt-4.1-mini` and is used only for
   unmatched manual dish classification and provider-reference selection.
 - `MEDIA_MEAL_RESOLVER_MODEL` independently configures draft-only media dish
@@ -295,12 +297,10 @@ docker run --rm -d --name nt-verify \
 docker stop nt-verify
 ```
 
-On 2026-08-16, that complete suite applied all 19 repository migrations to an empty
-Supabase-shaped Postgres 17 database and reported `203 passed`. The customer
-test suite reported `45 passed`, the dashboard suite reported `23 passed`, and
+On 2026-08-17, the repository migrations were applied to an empty
+Supabase-shaped Postgres 17 database and the customer production build passed.
 `npm audit --omit=dev` reported zero production vulnerabilities in each
-frontend. See `STATUS.html` for the other commands run and the exact boundary of
-that evidence.
+frontend.
 
 ## Current Limitations
 

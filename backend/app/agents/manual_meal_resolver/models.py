@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.dishes.models import NutrientsPerUnit
+from app.domain.meals.servings import MealServings
 
 
 class StrictModel(BaseModel):
@@ -41,7 +42,7 @@ class HouseholdPortionContext(StrictModel):
 class ManualResolverInput(StrictModel):
     meal_id: str = Field(min_length=1)
     dish_name: str = Field(min_length=1)
-    servings: float = Field(gt=0)
+    servings: MealServings
     global_dishes: list[GlobalDishContext]
     global_categories: list[GlobalCategoryContext]
     household_portions: list[HouseholdPortionContext]

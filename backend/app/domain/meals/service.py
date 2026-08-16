@@ -11,6 +11,7 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.domain.dishes import repository as dish_repo
 from app.domain.dishes.resolve import ATWATER, resolve_item
 from app.domain.meals import repository as repo
+from app.domain.meals.servings import normalize_meal_servings
 from app.utils.logger import logger
 
 
@@ -28,7 +29,12 @@ async def _prepare_item(
     note: str | None = None,
     confidence: str | None = None,
     nutrients: dict[str, Any] | None = None,
+    derive_calories: bool = True,
 ) -> dict[str, Any]:
+    try:
+        portions = normalize_meal_servings(portions)
+    except ValueError as exc:
+        raise ValidationError(str(exc), code="INVALID_MEAL_SERVINGS") from exc
     dish_name = (dish_name or "").strip() or f"{meal_type.title()} item"
     category: str | None = None
 
@@ -47,7 +53,7 @@ async def _prepare_item(
         # Level ① - use it and do not re-resolve behind them.
         resolution_unit = portion_unit or "serving"
         row_grams = grams
-        row_nutrients = _normalise_supplied_nutrients(nutrients)
+        row_nutrients = _normalise_supplied_nutrients(nutrients, derive_calories=derive_calories)
         resolved_from = "meals"
     elif food_id is None and category is None and grams is None:
         # Free text remains loggable when the resolver or nutrition provider is unavailable.
@@ -87,7 +93,9 @@ async def _prepare_item(
     }
 
 
-def _normalise_supplied_nutrients(nutrients: dict[str, Any]) -> dict[str, float]:
+def _normalise_supplied_nutrients(
+    nutrients: dict[str, Any], *, derive_calories: bool = True
+) -> dict[str, float]:
     out: dict[str, float] = {}
     for key, value in nutrients.items():
         try:
@@ -106,7 +114,7 @@ def _normalise_supplied_nutrients(nutrients: dict[str, Any]) -> dict[str, float]
         raise ValidationError(
             "At least one nutrient value is required.", code="EMPTY_NUTRIENT_ENTRY"
         )
-    if "calories_kcal" not in out and any(metric in out for metric in ATWATER):
+    if derive_calories and "calories_kcal" not in out and any(metric in out for metric in ATWATER):
         out["calories_kcal"] = round(
             sum(out.get(metric, 0.0) * factor for metric, factor in ATWATER.items()), 0
         )
@@ -128,6 +136,7 @@ async def add_item(
     note: str | None = None,
     confidence: str | None = None,
     nutrients: dict[str, Any] | None = None,
+    derive_calories: bool = True,
 ) -> dict[str, Any]:
     """Log one item; unmatched free text remains a first-class row."""
     item = await _prepare_item(
@@ -143,18 +152,13 @@ async def add_item(
         note=note,
         confidence=confidence,
         nutrients=nutrients,
+        derive_calories=derive_calories,
     )
-    version = await repo.next_day_version(user_id, meal_date)
-    existing = await repo.get_day(user_id, meal_date)
-    if existing:
-        version = existing[0]["version"]
     row = await repo.insert_meal(
         {
             **item,
             "user_id": user_id,
             "meal_date": meal_date.isoformat(),
-            "version": version,
-            "is_active": True,
         }
     )
     final_row = row
@@ -177,6 +181,36 @@ async def add_item(
         final_row["resolved_from"],
     )
     return final_row
+
+
+async def prepare_item(
+    *,
+    user_id: str,
+    meal_type: str,
+    dish_name: str | None,
+    food_id: str | None = None,
+    portions: float = 1.0,
+    grams: float | None = None,
+    portion_unit: str | None = None,
+    source: str = "manual",
+    confidence: str | None = None,
+    nutrients: dict[str, Any] | None = None,
+    derive_calories: bool = True,
+) -> dict[str, Any]:
+    """Resolve and freeze one item without writing it."""
+    return await _prepare_item(
+        user_id=user_id,
+        meal_type=meal_type,
+        dish_name=dish_name,
+        food_id=food_id,
+        portions=portions,
+        grams=grams,
+        portion_unit=portion_unit,
+        source=source,
+        confidence=confidence,
+        nutrients=nutrients,
+        derive_calories=derive_calories,
+    )
 
 
 async def replace_day(
@@ -226,11 +260,38 @@ async def adjust_item(
     grams: float | None = None,
 ) -> dict[str, Any]:
     """Change a portion or quantity and recompute nutrients."""
+    patch = await prepare_adjustment(
+        user_id=user_id,
+        meal_id=meal_id,
+        portions=portions,
+        portion_unit=portion_unit,
+        grams=grams,
+    )
+    updated = await repo.update_meal(user_id, meal_id, patch)
+    if not updated:
+        raise NotFoundError("Meal item not found", code="MEAL_NOT_FOUND")
+    return updated
+
+
+async def prepare_adjustment(
+    *,
+    user_id: str,
+    meal_id: str,
+    portions: float | None = None,
+    portion_unit: str | None = None,
+    grams: float | None = None,
+) -> dict[str, Any]:
+    """Compute an existing meal quantity patch without mutating the day."""
     current = await repo.get_meal(user_id, meal_id)
     if not current:
         raise NotFoundError("Meal item not found", code="MEAL_NOT_FOUND")
 
-    effective_portions = portions if portions is not None else current["portions"]
+    try:
+        effective_portions = normalize_meal_servings(
+            portions if portions is not None else current["portions"]
+        )
+    except ValueError as exc:
+        raise ValidationError(str(exc), code="INVALID_MEAL_SERVINGS") from exc
     if current.get("resolved_from") == "meals" and current.get("nutrients"):
         current_portions = float(current.get("portions") or 1)
         ratio = float(effective_portions) / current_portions
@@ -252,10 +313,7 @@ async def adjust_item(
             },
             "resolved_from": "meals",
         }
-        updated = await repo.update_meal(user_id, meal_id, patch)
-        if not updated:
-            raise NotFoundError("Meal item not found", code="MEAL_NOT_FOUND")
-        return updated
+        return patch
 
     res = await resolve_item(
         user_id=user_id,
@@ -273,10 +331,7 @@ async def adjust_item(
         "nutrients": res.nutrients,
         "resolved_from": res.resolved_from,
     }
-    updated = await repo.update_meal(user_id, meal_id, patch)
-    if not updated:
-        raise NotFoundError("Meal item not found", code="MEAL_NOT_FOUND")
-    return updated
+    return patch
 
 
 async def day_totals(rows: list[dict[str, Any]]) -> dict[str, Any]:

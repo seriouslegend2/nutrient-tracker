@@ -108,8 +108,8 @@ async def test_media_quantity_becomes_count_of_the_fixed_global_unit(monkeypatch
     item = payload["items"][0]
     assert item["resolved_name"] == "Dal Tadka"
     assert item["food_id"] == "dish-1"
-    assert item["servings"] == 1.25
-    assert item["total_grams"] == 200
+    assert item["servings"] == 1.5
+    assert item["total_grams"] == 240
     assert item["amount_source"] == "agent1_estimated"
     assert item["observed_quantity"]["total_grams"] == 200
     assert item["portion_metadata"] == {
@@ -122,10 +122,10 @@ async def test_media_quantity_becomes_count_of_the_fixed_global_unit(monkeypatch
         "fixed": True,
     }
     assert item["nutrients"] == {
-        "protein_g": 20,
-        "carbs_g": 40,
-        "fat_g": 10,
-        "calories_kcal": 330,
+        "protein_g": 24,
+        "carbs_g": 48,
+        "fat_g": 12,
+        "calories_kcal": 396,
     }
     assert payload["meal_date"] == "2026-08-16"
     assert payload["meal_type"] == "lunch"
@@ -144,9 +144,10 @@ async def test_agent_one_grams_are_not_replaced_by_household_usual(
     )
 
     item = payload["items"][0]
-    assert item["total_grams"] == 550
-    assert item["servings"] == 3.438
+    assert item["total_grams"] == 560
+    assert item["servings"] == 3.5
     assert item["servings"] != 1.5
+    assert item["observed_quantity"]["total_grams"] == 550
 
 
 async def test_pdf_date_and_slot_override_upload_defaults(monkeypatch) -> None:

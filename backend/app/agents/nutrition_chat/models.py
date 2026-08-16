@@ -13,11 +13,18 @@ class ToolCallSummary(BaseModel):
     detail: dict[str, Any] = Field(default_factory=dict)
 
 
-class ChatTurn(BaseModel):
-    """One agent reply. Confirmations render as undoable cards in the UI."""
+class ChatResponse(BaseModel):
+    """The only model-authored output; execution state is server-derived."""
 
     reply: str = Field(..., description="What to say back to the user")
+
+
+class ChatTurn(BaseModel):
+    """One normalized turn with authoritative server-derived execution state."""
+
+    reply: str
     tool_calls: list[ToolCallSummary] = Field(default_factory=list)
     needs_confirmation: bool = Field(
         False, description="True if a mutation is proposed but not yet applied"
     )
+    agent_actions: list[dict[str, Any]] = Field(default_factory=list, exclude=True)

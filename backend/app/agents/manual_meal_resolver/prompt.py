@@ -28,6 +28,8 @@ MANUAL_MEAL_RESOLVER_PROMPT = """You resolve one servings-only manual food entry
 
 The user message contains the typed dish name, serving count, complete active global dish universe,
 all valid global categories, and this user's merged category portions.
+The entered meal serving count is already normalized to a minimum of 0.5 and increments of 0.5;
+copy it as context and never reinterpret or change it.
 
 Rules:
 - Prefer match_existing whenever one supplied global dish clearly represents the entered food,

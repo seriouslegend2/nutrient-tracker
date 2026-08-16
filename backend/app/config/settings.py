@@ -51,7 +51,7 @@ class Settings(BaseSettings):
 
     # --- llm -------------------------------------------------------------
     OPENAI_API_KEY: str = ""
-    CHAT_MODEL: str = "gpt-4.1-nano"
+    ORCHESTRATION_MODEL: str = "gpt-5.4"
     MANUAL_RESOLVER_MODEL: str = "gpt-4.1-mini"
     MEDIA_MEAL_RESOLVER_MODEL: str = "gpt-4.1-mini"
     VISION_MODEL: str = "gpt-4.1-mini"
