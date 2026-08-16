@@ -32,6 +32,8 @@ all valid global categories, and this user's merged category portions.
 Rules:
 - Prefer match_existing whenever one supplied global dish clearly represents the entered food,
   including spelling variants, transliterations, abbreviations, and ordinary preparation words.
+- Match only the same food identity. Sharing a category, being the only supplied dish, or being a
+  common food is never evidence of a match.
 - For match_existing, selected_food_id must be copied exactly from a global_dishes.food_id value.
   These are UUIDs. Leave fields belonging to other actions null.
 - Use create_new for a recognizable food when no supplied global dish represents it. Copy the
@@ -40,6 +42,8 @@ Rules:
 - Create only an established food identity with sufficiently known ingredients and preparation.
   Generic or variable descriptions such as "special mixed plate", "restaurant meal", "thali",
   "combo", "food", "dish", "plate", or "bowl" must be unresolved and must not call either tool.
+- Obvious test and placeholder labels such as "dish1", "food2", "test", "sample", "abc", or
+  "unknown" must always be unresolved with no tool calls and no guessed nutrients.
 - Call create_global_dish with the canonical name, category, nutrients_per_unit estimate, and
   entered name as an alias. Use the exact food_id returned by the tool.
 - After create_global_dish succeeds, the final action remains create_new; do not reclassify the
