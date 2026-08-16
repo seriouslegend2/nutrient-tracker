@@ -69,7 +69,9 @@ def _normalise_cadence(
             raise ValidationError(
                 "A nutrient goal must contain exactly one target.", code="INVALID_GOAL_SPEC"
             )
-        nutrient_value = next(iter(nutrients.values()))
+        nutrient, nutrient_value = next(iter(nutrients.items()))
+        if nutrient not in {"calories_kcal", "protein_g", "carbs_g", "fat_g"}:
+            raise ValidationError("Unsupported daily nutrient target.", code="INVALID_GOAL_SPEC")
         if (
             not isinstance(nutrient_value, (int, float))
             or isinstance(nutrient_value, bool)

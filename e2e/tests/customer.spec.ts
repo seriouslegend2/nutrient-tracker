@@ -107,13 +107,21 @@ test.describe.serial('customer non-agent journey', () => {
   })
 
   test('multiple safe goals and explicit training check-ins stay independent', async ({}, testInfo) => {
-    await page.goto(`${CUSTOMER_URL}/goals/new`)
-    await page.getByRole('radio', { name: /Protein/ }).click()
-    await page.getByLabel('Protein (grams per day)').fill('20')
-    await page.getByRole('button', { name: 'Preview goal' }).click()
-    await expect(page.getByText(/applied target is/i)).toBeVisible()
-    await page.getByRole('button', { name: 'Add a goal' }).click()
-    await expect(page.getByRole('tab', { name: 'Daily protein' })).toBeVisible()
+    const dailyNutrients = [
+      { type: /Calories/, field: 'Calories (kcal per day)', value: '2100', tab: 'Daily calories' },
+      { type: /Protein/, field: 'Protein (grams per day)', value: '20', tab: 'Daily protein' },
+      { type: /Carbs/, field: 'Carbs (grams per day)', value: '250', tab: 'Daily carbs' },
+      { type: /Fat/, field: 'Fat (grams per day)', value: '65', tab: 'Daily fat' },
+    ]
+    for (const nutrient of dailyNutrients) {
+      await page.goto(`${CUSTOMER_URL}/goals/new`)
+      await page.getByRole('radio', { name: nutrient.type }).click()
+      await page.getByLabel(nutrient.field).fill(nutrient.value)
+      await page.getByRole('button', { name: 'Preview goal' }).click()
+      await expect(page.getByRole('heading', { name: 'Goal preview' })).toBeVisible()
+      await page.getByRole('button', { name: 'Add a goal' }).click()
+      await expect(page.getByRole('tab', { name: nutrient.tab })).toBeVisible()
+    }
 
     await page.goto(`${CUSTOMER_URL}/goals/new`)
     await page.getByRole('radio', { name: /Hydration/ }).click()
@@ -221,6 +229,26 @@ test.describe.serial('customer non-agent journey', () => {
     page.once('dialog', (dialog) => dialog.accept())
     await row.getByRole('button', { name: 'Remove' }).click()
     await expect(rowButton).toHaveCount(0)
+  })
+
+  test('unmatched manual food remains servings-only', async ({}, testInfo) => {
+    const dishName = 'E2E free text serving-only'
+    await page.goto(`${CUSTOMER_URL}/meals`)
+    await page.getByRole('button', { name: '+ Add snacks' }).click()
+    const form = page.getByRole('region', { name: 'Add manually' })
+    await form.getByLabel('Dish').fill(dishName)
+    await expect(form.getByText(/No matching food found/)).toBeVisible()
+    await expect(form.getByLabel(/grams/i)).toHaveCount(0)
+    await form.getByLabel('Servings').fill('1.25')
+
+    const createResponse = waitForMealMutation(page, 'POST')
+    await form.getByRole('button', { name: 'Add meal', exact: true }).click()
+    const createdId = await successfulMealId(await createResponse)
+    const row = page.locator(`[data-meal-id="${createdId}"]`)
+
+    await expect(row).toContainText(dishName)
+    await expect(row).toContainText('1.25 serving')
+    await evidence(page, testInfo, 'customer-unmatched-serving-only')
   })
 
   test('water logging updates Today', async ({}, testInfo) => {

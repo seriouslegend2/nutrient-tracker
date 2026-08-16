@@ -39,11 +39,14 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
 <thead><tr><th>Area</th><th>Status</th><th>Evidence in repository</th></tr></thead>
 <tbody>
 <tr><td>Backend API</td><td class="ok">Implemented</td><td>Profile/onboarding, meals/day history, dishes/categories, goals, reports, water, messages, and admin routers under <code>backend/app/api/v1</code>.</td></tr>
-<tr><td>Database</td><td class="ok">Implemented and hosted</td><td>15 ordered migrations; 16 expected public tables; formulas, triggers, atomic versioning functions, grants, and RLS.</td></tr>
+<tr><td>Database</td><td class="ok">Implemented; hosted baseline verified</td><td>19 ordered repository migrations; the first 16 were previously verified on hosted Supabase. The schema includes formulas, triggers, atomic versioning functions, grants, and RLS.</td></tr>
 <tr><td>Customer UI</td><td class="ok">Implemented</td><td>One-click Google OAuth signup/login with account chooser, first-run onboarding, concurrent goal flow, Today progress/calendar, manual meals, agent, analytics, hydration, and logout.</td></tr>
-<tr><td>Dashboard</td><td class="ok">Implemented, bounded scope</td><td>Email/password sign-in for existing accounts only, logout, backend admin-role gate, paginated users, six supported user views, aggregate agent metrics, and portion resolution mix. It has no signup or callback; search/filter/sort and Food DB tools are absent by design.</td></tr>
+<tr><td>Dashboard</td><td class="ok">Implemented, bounded scope</td><td>Google sign-in, logout, backend admin-role gate, paginated users, six supported user views, aggregate agent metrics, and portion resolution mix. Search/filter/sort and Food DB tools are absent by design.</td></tr>
 <tr><td><code>nutrition_chat</code></td><td class="ok">Implemented, provider-dependent</td><td>LangChain agent, read/mutation tools, confirmation gating, persistence, and unit flow tests.</td></tr>
-<tr><td><code>media_extraction</code></td><td class="ok">Implemented, provider-dependent</td><td>LangGraph orchestration for images, explicit label hints, audio, and PDF drafts; byte limits and agent-run persistence.</td></tr>
+<tr><td><code>media_facts</code></td><td class="ok">Implemented, live verified</td><td>One typed system prompt and separate multimodal user input for supported images and PDFs.</td></tr>
+<tr><td><code>media_meal_resolver</code></td><td class="ok">Implemented, live verified</td><td>Separate draft-only agent with catalog mapping/creation and no customer meal mutation dependency.</td></tr>
+<tr><td><code>manual_meal_resolver</code></td><td class="ok">Implemented</td><td>Separate direct-log agent for a typed dish name and supplied serving count.</td></tr>
+<tr><td>Speech to text</td><td class="ok">Implemented, provider-dependent</td><td>Prompt-free audio transcription routes the plain transcript to <code>nutrition_chat</code>.</td></tr>
 <tr><td>Video</td><td class="pending">Not supported</td><td>Video MIME types are explicitly rejected.</td></tr>
 </tbody>
 </table>
@@ -58,8 +61,8 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
   <li><code>uv run ruff format --check app tests</code>: passed; 81 files already formatted.</li>
   <li>Configured mypy command from CI: passed with no issues in 12 source files.</li>
   <li><code>uv run lint-imports</code>: 4 contracts kept, 0 broken; 65 files and 127 dependencies analyzed.</li>
-  <li><code>NT_REQUIRE_DATABASE=1 NT_FAIL_ON_SKIP=1 uv run pytest -q</code> against <code>pgvector/pgvector:pg17</code>: <code>98 passed in 12.96s</code>, no skips.</li>
-  <li>Customer Vitest suite: <code>31 passed</code>; dashboard Vitest suite: <code>22 passed</code>.</li>
+  <li><code>NT_REQUIRE_DATABASE=1 NT_FAIL_ON_SKIP=1 uv run pytest -q</code> against <code>pgvector/pgvector:pg17</code>: <code>203 passed</code>, no skips.</li>
+  <li>Customer Vitest suite: <code>45 passed</code>; dashboard Vitest suite: <code>23 passed</code>.</li>
   <li>Root Playwright infrastructure: strict TypeScript passed, 3 report tests passed, and 15 hosted Chromium scenarios were discovered.</li>
   <li>Current hosted Playwright run after the goal/portion migrations: <code>15 passed in 2.3m</code>, with 17 named screenshots and a 9-page <code>artifacts/e2e-report.pdf</code>. All generated auth users were removed.</li>
   <li><code>npm audit --omit=dev</code> in each frontend: 0 production vulnerabilities.</li>
@@ -122,8 +125,8 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
 <ul>
   <li>The exposed service-role key and database password must be rotated, and the shared JWT placeholder must be replaced before production use.</li>
   <li>Hosted migrations, PostgREST, auth-user provisioning, Supabase sessions, BFF JWTs, admin access, and non-admin denial were verified. Direct authenticated-client RLS behavior remains unverified because the shipped BFF uses service-role database access.</li>
-  <li>Live OpenAI calls for chat, image, label-hinted image, audio, and PDF remain unverified without a provider key. Unit tests use mocked provider output.</li>
-  <li>The complete non-agent browser login, onboarding, goal, meal, water, report, profile, logout, and admin flow passed. Agent and media flows remain intentionally outside this evidence.</li>
+  <li>Live OpenAI image and PDF calls passed through the authenticated FastAPI draft and confirmation path against hosted Supabase. Live chat, label-hinted image, and audio remain unverified.</li>
+  <li>The complete non-agent browser login, onboarding, goal, meal, water, report, profile, logout, and admin flow passed. Agent and media browser automation remains outside this evidence.</li>
 </ul>
 </section>
 

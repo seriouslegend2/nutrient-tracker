@@ -32,7 +32,8 @@ export async function proxy(request: NextRequest) {
 
   const path = request.nextUrl.pathname
   const isPublic =
-    path.startsWith('/auth') || path.startsWith('/_next') || path === '/favicon.ico'
+    path === '/auth/login' || path === '/auth/callback' ||
+    path.startsWith('/_next') || path === '/favicon.ico'
   const isApi = path.startsWith('/api')
 
   // Redirect page requests. API routes return their own JSON 401s.

@@ -1,4 +1,5 @@
 import { safeNext } from '@/lib/auth'
+import { clearDashboardStorage } from '@/lib/dashboard-storage'
 
 export class ApiError extends Error {
   constructor(
@@ -21,6 +22,7 @@ export async function getJson<T>(path: string): Promise<T> {
   }
 
   if (response.status === 401 && typeof window !== 'undefined') {
+    clearDashboardStorage()
     const next = safeNext(`${window.location.pathname}${window.location.search}`)
     window.location.replace(
       `/auth/login?error=session_expired&next=${encodeURIComponent(next)}`

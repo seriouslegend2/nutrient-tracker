@@ -450,7 +450,8 @@ function MetricBar({ title, actual, target, unit, pct, direction }: {
   direction: string
 }) {
   const over = actual != null && actual > target
-  const colour = direction === 'at_most' && over ? 'var(--color-danger)' : 'var(--color-accent-strong)'
+  const outsideRange = direction === 'around' && actual != null && (actual < target * 0.9 || actual > target * 1.1)
+  const colour = (direction === 'at_most' && over) || outsideRange ? 'var(--color-danger)' : 'var(--color-accent-strong)'
   return <div className="rounded-xl p-3" style={{ background: 'var(--color-surface-soft)' }}>
     <div className="flex items-baseline justify-between gap-2"><span className="text-sm font-semibold">{title}</span><strong className="tabular-nums">{formatGoalValue(actual, unit, '—')} / {formatGoalValue(target, unit, '')}</strong></div>
     <Bar value={pct ?? 0} target={100} colour={colour} />

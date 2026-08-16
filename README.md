@@ -12,17 +12,19 @@ The implemented customer flow includes:
   and required first-run onboarding.
 - Manual meal logging by date and meal type, substring dish search, category/
   household serving resolution, and version-preserving serving-count edits/deletes.
-- Concurrent daily, weekly, monthly, and fixed-period goals for weight, protein,
-  hydration, and explicit training check-ins, including calorie floors, rate
-  clamps, BMI checks, protein/hydration guards, and medical-condition guards.
+- Concurrent daily, weekly, monthly, and fixed-period goals for weight, calories,
+  protein, carbs, fat, hydration, and explicit training check-ins, including
+  calorie floors, rate clamps, BMI checks, protein/hydration guards, and
+  medical-condition guards.
 - Daily calorie/macro totals, per-goal Today/period/calendar progress, hydration logging/history, weight
   history, and day/week/month charts for calories, macros, micronutrients, and
   goal-versus-actual values.
 - An optional `nutrition_chat` agent for conversational reads and explicitly
   confirmed mutations.
-- An optional `media_extraction` agent for food photos, explicitly identified
-  nutrition-label photos, audio transcription, and food-diary PDF extraction.
-  Extracted meal rows are editable drafts and are not written until confirmed.
+- Separate `media_facts`, `media_meal_resolver`, and `manual_meal_resolver`
+  agents. Media resolution can map or create catalog dishes but produces only a
+  serving-based review draft; customer meal rows are not written until confirmation.
+  Prompt-free OpenAI speech-to-text sends audio transcripts to `nutrition_chat`.
 - A paginated, admin-gated dashboard with user overview, meals, goals,
   preferences, conversations, agent runs, aggregate agent metrics, and portion
   resolution metrics.
@@ -76,7 +78,9 @@ backend/app/
   api/v1/                 FastAPI routers, including admin routes
   agents/
     nutrition_chat/       tool-using conversational agent
-    media_extraction/     LangGraph media normalization agent
+    media_facts/          factual image/PDF evidence agent
+    media_meal_resolver/  draft-only media catalog resolver
+    manual_meal_resolver/ direct-log manual catalog resolver
   core/                   auth, RBAC, pagination, errors
   domain/                 meals, dishes, goals, profile, reports, water, admin
   services/               Supabase client, media provider I/O, identity
@@ -118,10 +122,17 @@ cp internal-dashboard/.env.example internal-dashboard/.env.local
 - `JWT_SECRET_KEY` in the backend must exactly match `BACKEND_JWT_SECRET` in both
   BFFs.
 - `OPENAI_API_KEY` is optional. Manual onboarding, meals, goals, reports, and
-  hydration remain usable without it; media reports that AI is disabled and
-  the chat assistant cannot complete turns.
+  hydration remain usable without it; unmatched meals stay honestly unresolved,
+  media reports that AI is disabled, and the chat assistant cannot complete turns.
+  `DEMO_KEY` is suitable for development only.
+- `MANUAL_RESOLVER_MODEL` defaults to `gpt-4.1-mini` and is used only for
+  unmatched manual dish classification and provider-reference selection.
+- `MEDIA_MEAL_RESOLVER_MODEL` independently configures draft-only media dish
+  resolution.
 - `LANGSMITH_API_KEY` is optional. When configured, agent runs are traced to
-  `LANGSMITH_PROJECT` and all five runtime prompts are pulled from LangSmith.
+  `LANGSMITH_PROJECT` and four runtime prompts are pulled from LangSmith:
+  `media-facts-v1`, `media-meal-resolver-v1`, `manual-meal-resolver-v1`,
+  and `nutrition-chat-v1`.
   Any unavailable or invalid remote prompt falls back to its checked-in string.
 - Publish the checked-in prompt set and create/update the tracing project with
   `cd backend && uv run python -m scripts.publish_prompts`.
@@ -284,9 +295,9 @@ docker run --rm -d --name nt-verify \
 docker stop nt-verify
 ```
 
-On 2026-08-16, that complete suite applied all 16 migrations to an empty
-Supabase-shaped Postgres 17 database and reported `126 passed`. The customer
-test suite reported `46 passed`, the dashboard suite reported `23 passed`, and
+On 2026-08-16, that complete suite applied all 19 repository migrations to an empty
+Supabase-shaped Postgres 17 database and reported `203 passed`. The customer
+test suite reported `45 passed`, the dashboard suite reported `23 passed`, and
 `npm audit --omit=dev` reported zero production vulnerabilities in each
 frontend. See `STATUS.html` for the other commands run and the exact boundary of
 that evidence.
@@ -295,7 +306,7 @@ that evidence.
 
 - Dish search is normalized substring matching. There is no shipped ranking,
   BM25, embedding, or combined lexical/vector retrieval.
-- The optional seed is 61 curated dishes plus 18 category defaults from a
+- The optional seed is 61 curated dishes plus 19 category defaults from a
   migration. It does not include a demo user or a complete food corpus.
 - Video uploads are rejected. Images are limited to 10 MB, audio to 25 MB, and
   PDFs to 20 MB; page and audio-duration limits are not implemented.
@@ -304,8 +315,7 @@ that evidence.
   later visual inspection is unavailable.
 - PDF extraction uses one selected confirmation date and meal type for the
   reviewed batch; it is not a general document archive/import system.
-- Nutrition-label routing depends on explicit user wording or filename hints;
-  it is not automatic image classification.
+- One media-facts prompt handles food photos, nutrition labels, and food-diary PDFs.
 - The customer app has a web manifest but no service worker/offline mode. It has
   no account export or self-service account deletion.
 - Fixed category units and grams are shown under **You → Your portions**.

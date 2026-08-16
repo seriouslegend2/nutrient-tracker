@@ -186,6 +186,36 @@ def test_open_at_most_day_is_not_complete_before_day_closes() -> None:
 
 
 @pytest.mark.unit
+def test_around_target_uses_ten_percent_band_after_day_closes() -> None:
+    result = evaluate_goal_progress(
+        goal(
+            kind="nutrient",
+            cadence="daily",
+            starts_on="2026-02-01",
+            ends_on="2026-02-04",
+            value=200,
+            metric="carbs_g",
+            unit="g",
+            direction="around",
+        ),
+        {
+            date(2026, 2, 1): 185,
+            date(2026, 2, 2): 170,
+            date(2026, 2, 3): 225,
+            date(2026, 2, 4): 200,
+        },
+        date(2026, 2, 4),
+    )
+
+    assert [day["status"] for day in result["calendar"]] == [
+        "met",
+        "below",
+        "above",
+        "in_progress",
+    ]
+
+
+@pytest.mark.unit
 def test_period_cadence_clips_actuals_and_calendar_to_goal_dates() -> None:
     result = evaluate_goal_progress(
         goal(

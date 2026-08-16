@@ -45,11 +45,12 @@ def _status(
             return "above"
         return "in_progress" if open_bucket else "met"
     if direction == "around":
-        if actual == target:
-            return "met"
         if open_bucket:
             return "in_progress"
-        return "above" if actual > target else "below"
+        tolerance = target * 0.1
+        if target - tolerance <= actual <= target + tolerance:
+            return "met"
+        return "above" if actual > target + tolerance else "below"
     if actual >= target:
         return "met"
     return "in_progress" if open_bucket else "below"

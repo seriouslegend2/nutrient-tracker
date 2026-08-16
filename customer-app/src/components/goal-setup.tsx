@@ -6,16 +6,38 @@ import { useState } from 'react'
 import { api, ApiRequestError, type GoalPreview, type GoalRequest } from '@/lib/api-client'
 import { localDateISO } from '@/lib/date'
 
-export type GoalBuilderType = 'weight' | 'protein' | 'hydration' | 'training'
+export type GoalBuilderType = 'weight' | 'calories' | 'protein' | 'carbs' | 'fat' | 'hydration' | 'training'
+type NutrientBuilderType = 'calories' | 'protein' | 'carbs' | 'fat'
 type TrainingCadence = 'weekly' | 'monthly' | 'period'
 type PreviewSnapshot = { type: GoalBuilderType; payload: GoalRequest; result: GoalPreview }
 
 const GOAL_TYPES: { type: GoalBuilderType; name: string; detail: string; cadence: string }[] = [
   { type: 'weight', name: 'Weight', detail: 'Lose or gain kilograms', cadence: 'Fixed period' },
+  { type: 'calories', name: 'Calories', detail: 'Target daily energy', cadence: 'Daily' },
   { type: 'protein', name: 'Protein', detail: 'Reach grams each day', cadence: 'Daily' },
+  { type: 'carbs', name: 'Carbs', detail: 'Target grams each day', cadence: 'Daily' },
+  { type: 'fat', name: 'Fat', detail: 'Target grams each day', cadence: 'Daily' },
   { type: 'hydration', name: 'Hydration', detail: 'Reach millilitres each day', cadence: 'Daily' },
   { type: 'training', name: 'Training', detail: 'Track self-reported training days', cadence: 'Flexible' },
 ]
+
+const NUTRIENT_GOALS: Record<NutrientBuilderType, {
+  metric: 'calories_kcal' | 'protein_g' | 'carbs_g' | 'fat_g'
+  direction: 'at_least' | 'around'
+  label: string
+  inputLabel: string
+  defaultValue: string
+  max: string
+}> = {
+  calories: { metric: 'calories_kcal', direction: 'around', label: 'Daily calories', inputLabel: 'Calories (kcal per day)', defaultValue: '2000', max: '9999' },
+  protein: { metric: 'protein_g', direction: 'at_least', label: 'Daily protein', inputLabel: 'Protein (grams per day)', defaultValue: '60', max: '1000' },
+  carbs: { metric: 'carbs_g', direction: 'around', label: 'Daily carbs', inputLabel: 'Carbs (grams per day)', defaultValue: '250', max: '2000' },
+  fat: { metric: 'fat_g', direction: 'around', label: 'Daily fat', inputLabel: 'Fat (grams per day)', defaultValue: '65', max: '1000' },
+}
+
+function isNutrientType(type: GoalBuilderType): type is NutrientBuilderType {
+  return type in NUTRIENT_GOALS
+}
 
 const defaultEnd = () => {
   const date = new Date()
@@ -36,12 +58,17 @@ export function buildGoalPayload(
   if (type === 'weight') {
     return { ...common, kind: 'body_weight', cadence: 'period', spec: { direction, amount_kg: value } }
   }
-  if (type === 'protein') {
+  if (isNutrientType(type)) {
+    const nutrient = NUTRIENT_GOALS[type]
     return {
       ...common,
       kind: 'nutrient',
       cadence: 'daily',
-      spec: { nutrients: { protein_g: value }, direction: 'at_least', label: 'Daily protein' },
+      spec: {
+        nutrients: { [nutrient.metric]: value },
+        direction: nutrient.direction,
+        label: nutrient.label,
+      },
     }
   }
   if (type === 'hydration') {
@@ -65,7 +92,13 @@ export function GoalSetup({ isPregnantOrNursing = false, hasMedicalCondition = f
   const [type, setType] = useState<GoalBuilderType>('weight')
   const [direction, setDirection] = useState<'lose' | 'gain'>('lose')
   const [values, setValues] = useState<Record<GoalBuilderType, string>>({
-    weight: '5', protein: '60', hydration: '2000', training: '3',
+    weight: '5',
+    calories: NUTRIENT_GOALS.calories.defaultValue,
+    protein: NUTRIENT_GOALS.protein.defaultValue,
+    carbs: NUTRIENT_GOALS.carbs.defaultValue,
+    fat: NUTRIENT_GOALS.fat.defaultValue,
+    hydration: '2000',
+    training: '3',
   })
   const [endsOn, setEndsOn] = useState(defaultEnd)
   const [makePrimary, setMakePrimary] = useState(false)
@@ -102,6 +135,7 @@ export function GoalSetup({ isPregnantOrNursing = false, hasMedicalCondition = f
   const periodDays = Number.isNaN(selectedEnd.getTime()) ? 0 : Math.round((selectedEnd.getTime() - tomorrow.getTime()) / 86_400_000) + 2
   const trainingMax = trainingCadence === 'weekly' ? 7 : trainingCadence === 'monthly' ? 31 : Math.max(1, periodDays)
   const invalid = !Number.isFinite(value) || value <= 0 || (type === 'weight' && value > 100) ||
+    (isNutrientType(type) && value > Number(NUTRIENT_GOALS[type].max)) ||
     (type === 'hydration' && value >= 10_000) ||
     (type === 'training' && (!Number.isInteger(value) || value > trainingMax)) ||
     !endsOn || endsOn <= today || endsOn > localDateISO(latestEnd)
@@ -118,11 +152,11 @@ export function GoalSetup({ isPregnantOrNursing = false, hasMedicalCondition = f
       <p className="eyebrow mb-1">Goals</p>
       <h1 className="display-title text-3xl">{title}</h1>
       <p className="mb-5 mt-1 text-sm" style={{ color: 'var(--color-tx2)' }}>
-        Choose one focus, then preview the resolved target and its safety calculation before adding it.
+        Choose a daily target or period goal, then preview how it will be evaluated before adding it.
       </p>
 
       <fieldset disabled={busy} className="m-0 border-0 p-0">
-      <div role="radiogroup" aria-label="Goal type" className="grid grid-cols-2 gap-2">
+      <div role="radiogroup" aria-label="Goal type" className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {GOAL_TYPES.map((goal) => (
           <button key={goal.type} type="button" role="radio" aria-checked={type === goal.type}
                   onKeyDown={(event) => {
@@ -165,10 +199,15 @@ export function GoalSetup({ isPregnantOrNursing = false, hasMedicalCondition = f
           </label>
           <NumberField label="Amount (kg)" value={values.weight} min="0.1" max="100" step="0.1" onChange={changeValue} />
         </>}
-        {type === 'protein' && <>
-          <NumberField label="Protein (grams per day)" value={values.protein} min="1" step="1" onChange={changeValue} />
+        {isNutrientType(type) && <>
+          <NumberField label={NUTRIENT_GOALS[type].inputLabel} value={values[type]} min="1"
+                       max={NUTRIENT_GOALS[type].max} step="1" onChange={changeValue} />
           <p className="rounded-2xl p-3 text-sm" style={{ background: 'var(--color-surface-soft)', color: 'var(--color-tx2)' }}>
-            Your preview compares this request with a weight-based RDA baseline. If your request is lower, the safer baseline is applied and shown clearly.
+            {type === 'protein'
+              ? 'Protein is checked against a weight-based baseline. A lower request is raised to that safer minimum.'
+              : type === 'calories'
+                ? 'Calories are evaluated as a daily target. Requests below the safe calorie floor are raised and shown in the preview.'
+                : `${NUTRIENT_GOALS[type].label} is evaluated from nutrients in your logged meals, using a 10% target range for completed days.`}
           </p>
         </>}
         {type === 'hydration' && <>
@@ -263,6 +302,21 @@ function Derivation({ type, derivation, clamped }: { type: GoalBuilderType; deri
       {clamped
         ? `You requested ${formatNumber(requested)} g/day, below your RDA-derived ${formatNumber(floor)} g baseline. The applied target is ${formatNumber(applied)} g/day.`
         : `Your ${formatNumber(applied)} g/day target is at or above the RDA-derived ${formatNumber(floor)} g baseline for your recorded weight.`}
+    </p>
+  }
+  if (type === 'calories') {
+    const requested = optionalNumberFrom(derivation.requested_intake_kcal)
+    const applied = optionalNumberFrom(derivation.applied_intake_kcal)
+    const floor = optionalNumberFrom(derivation.calorie_floor_kcal)
+    return <p className="mt-1" style={{ color: clamped ? 'var(--color-warn)' : 'var(--color-tx2)' }}>
+      {clamped
+        ? `You requested ${formatOptionalNumber(requested)} kcal/day. The safe floor is ${formatOptionalNumber(floor)} kcal, so ${formatOptionalNumber(applied)} kcal/day will be applied.`
+        : 'Your stated calorie target will be evaluated from the calories in logged meals.'}
+    </p>
+  }
+  if (type === 'carbs' || type === 'fat') {
+    return <p className="mt-1" style={{ color: 'var(--color-tx2)' }}>
+      Your stated {type} target will be evaluated from logged meals. Completed days within 10% of the target are reached.
     </p>
   }
   if (type === 'hydration') {

@@ -20,6 +20,18 @@ describe('goal builder payloads', () => {
       kind: 'nutrient', cadence: 'daily',
       spec: { nutrients: { protein_g: 70 }, direction: 'at_least', label: 'Daily protein' },
     })
+    expect(buildGoalPayload('calories', 2100, end, 'lose', false, start)).toMatchObject({
+      kind: 'nutrient', cadence: 'daily',
+      spec: { nutrients: { calories_kcal: 2100 }, direction: 'around', label: 'Daily calories' },
+    })
+    expect(buildGoalPayload('carbs', 250, end, 'lose', false, start)).toMatchObject({
+      kind: 'nutrient', cadence: 'daily',
+      spec: { nutrients: { carbs_g: 250 }, direction: 'around', label: 'Daily carbs' },
+    })
+    expect(buildGoalPayload('fat', 65, end, 'lose', false, start)).toMatchObject({
+      kind: 'nutrient', cadence: 'daily',
+      spec: { nutrients: { fat_g: 65 }, direction: 'around', label: 'Daily fat' },
+    })
     expect(buildGoalPayload('hydration', 2200, end, 'lose', false, start)).toMatchObject({
       kind: 'hydration', cadence: 'daily', spec: { target_ml: 2200, label: 'Daily hydration' },
     })

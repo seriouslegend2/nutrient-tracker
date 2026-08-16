@@ -32,7 +32,7 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
 <header>
   <h1>Current Product and Deferred Plan</h1>
   <p>This is a post-remediation scope record. It separates what exists in the repository from intentional backlog; it is not a promise that every original design idea shipped.</p>
-  <div class="meta"><span class="pill">reconciled 2026-08-16</span><span class="pill">15 migrations</span><span class="pill">98 backend tests</span><span class="pill">2 implemented agents</span></div>
+  <div class="meta"><span class="pill">reconciled 2026-08-16</span><span class="pill">19 repository migrations</span><span class="pill">203 backend tests</span><span class="pill">4 implemented agents</span></div>
 </header>
 
 <section>
@@ -94,11 +94,13 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
 
 <section>
 <h2>Implemented AI Surface</h2>
-<p>The only implemented agent names are <code>nutrition_chat</code> and <code>media_extraction</code>.</p>
+<p>The implemented agent names are <code>nutrition_chat</code>, <code>media_facts</code>, <code>media_meal_resolver</code>, and <code>manual_meal_resolver</code>.</p>
 <ul>
   <li><code>nutrition_chat</code> has read tools for dish search, meal history, and goal status plus explicitly gated mutation tools for meals, goals, water, weight, and portions.</li>
-  <li><code>media_extraction</code> normalizes JPEG/PNG/WebP food photos, explicitly label-hinted images, supported audio, and food-diary PDFs before chat.</li>
-  <li>Ordinary image uploads use three extraction samples. Review cards expose editable mass and ranges before commit.</li>
+  <li><code>media_facts</code> uses one system prompt for JPEG/PNG/WebP images and PDFs and emits one authoritative quantity per item.</li>
+  <li><code>media_meal_resolver</code> maps or creates global dishes from those facts but cannot write customer meals. Deterministic code converts Agent 1 quantity into servings using fixed serving grams.</li>
+  <li><code>manual_meal_resolver</code> resolves a user-submitted dish and serving count for the explicit direct-log flow.</li>
+  <li>Audio uses prompt-free speech-to-text and sends the plain transcript to <code>nutrition_chat</code>.</li>
   <li>PDF rows become reviewable meal items. The selected confirmation date and meal type apply to the batch.</li>
   <li>Upload bytes are transient and not persisted. Message text, structured output, metadata, and agent-run telemetry are persisted.</li>
   <li>Without an OpenAI key, AI calls report disabled while the manual product remains usable.</li>
@@ -143,7 +145,7 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
   <li>Configure a Google Web OAuth client, enable the Supabase Google provider, allow the Supabase Auth callback in Google, and allow the customer <code>/auth/callback</code> in Supabase URL Configuration. Drive first-time Google signup, returning-user login, account selection, onboarding, logout, dashboard sign-in, role denial, and admin-role access.</li>
   <li>With an OpenAI credential, exercise live chat, photo, label-hinted photo, audio, and PDF paths, including failed and confirmed drafts.</li>
 </ol>
-<p>Steps 3-5 remain external runtime verification, not completed product evidence. Local evidence is 15 migrations, 98 backend tests, 31 customer tests, 22 dashboard tests, Next.js 16.3.1 in both lockfiles, and zero production vulnerabilities from both frontend audits. The hosted non-agent suite passes all 15 scenarios.</p>
+<p>Steps 3-4 remain external runtime verification. The authenticated image/PDF agent flow is live verified. Local evidence is 19 repository migrations, 203 backend tests, 45 customer tests, 23 dashboard tests, Next.js 16.3.1 in both lockfiles, and zero production vulnerabilities from both frontend audits. The hosted non-agent suite discovers 16 scenarios.</p>
 </section>
 </main></body>
 </html>

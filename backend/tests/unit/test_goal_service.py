@@ -76,3 +76,33 @@ def test_nutrient_goal_requires_one_positive_target() -> None:
             date(2026, 1, 1),
             date(2026, 2, 1),
         )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("metric", "value"),
+    [("calories_kcal", 2000), ("protein_g", 60), ("carbs_g", 250), ("fat_g", 65)],
+)
+def test_supported_daily_nutrient_targets(metric: str, value: float) -> None:
+    assert (
+        _normalise_cadence(
+            "nutrient",
+            "daily",
+            {"nutrients": {metric: value}},
+            date(2026, 1, 1),
+            date(2026, 2, 1),
+        )
+        == "daily"
+    )
+
+
+@pytest.mark.unit
+def test_unknown_daily_nutrient_target_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="Unsupported"):
+        _normalise_cadence(
+            "nutrient",
+            "daily",
+            {"nutrients": {"mystery_g": 10}},
+            date(2026, 1, 1),
+            date(2026, 2, 1),
+        )

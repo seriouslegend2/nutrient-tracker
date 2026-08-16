@@ -1,16 +1,18 @@
 @import 'tailwindcss';
 
-/* Design tokens in oklch, light + dark. No hardcoded hex in components -
-   that rule is lint-enforced (see scripts/lint-design.mjs). */
+/* Design tokens in oklch, light + dark. */
 @theme {
   --color-bg: oklch(0.99 0.005 95);
   --color-surface: oklch(1 0 0);
   --color-line: oklch(0.92 0.006 95);
   --color-tx: oklch(0.25 0.01 95);
-  --color-tx2: oklch(0.52 0.012 95);
-  --color-accent: oklch(0.68 0.15 155);
-  --color-warn: oklch(0.75 0.14 75);
-  --color-danger: oklch(0.62 0.19 25);
+  --color-tx2: oklch(0.46 0.012 95);
+  --color-accent: oklch(0.5 0.14 155);
+  --color-accent-on: oklch(0.99 0.005 95);
+  --color-accent-soft: oklch(0.94 0.035 155);
+  --color-warn: oklch(0.58 0.14 75);
+  --color-danger: oklch(0.52 0.19 25);
+  --color-danger-soft: oklch(0.95 0.035 25);
   --color-protein: oklch(0.65 0.16 255);
   --color-carbs: oklch(0.72 0.14 75);
   --color-fat: oklch(0.68 0.15 25);
@@ -24,16 +26,50 @@
     --color-line: oklch(0.3 0.01 95);
     --color-tx: oklch(0.95 0.005 95);
     --color-tx2: oklch(0.72 0.01 95);
+    --color-accent: oklch(0.72 0.13 155);
+    --color-accent-on: oklch(0.16 0.02 155);
+    --color-accent-soft: oklch(0.28 0.04 155);
+    --color-warn: oklch(0.76 0.13 75);
+    --color-danger: oklch(0.72 0.16 25);
+    --color-danger-soft: oklch(0.28 0.05 25);
   }
 }
 
-html, body { background: var(--color-bg); color: var(--color-tx); }
-body { -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
+html { color-scheme: light dark; }
+html, body { min-height: 100%; background: var(--color-bg); color: var(--color-tx); }
+body { font-size: 16px; -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
+button, a, select { outline-offset: 3px; }
+button:focus-visible, a:focus-visible, select:focus-visible {
+  outline: 2px solid var(--color-accent);
+}
+button:not(:disabled), select:not(:disabled) { cursor: pointer; }
 
-/* Mobile-first: designed at 390px and allowed to grow. */
-.app-shell { max-width: 640px; margin: 0 auto; padding-bottom: 84px; }
 .card {
   background: var(--color-surface);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
+}
+
+.control-button {
+  min-height: 2.5rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.scroll-region {
+  overscroll-behavior: contain;
+  scrollbar-color: var(--color-accent) var(--color-line);
+  scrollbar-width: auto;
+}
+
+.scroll-region::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroll-region::-webkit-scrollbar-track { background: var(--color-line); border-radius: 999px; }
+.scroll-region::-webkit-scrollbar-thumb {
+  background: var(--color-accent);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
 }
