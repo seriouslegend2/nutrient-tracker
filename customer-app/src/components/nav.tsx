@@ -3,27 +3,22 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-/** Bottom tab bar, five items, thumb zone. No hover-dependent interaction. */
 const TABS = [
-  { href: '/home', label: 'Home', icon: '◎' },
-  { href: '/meals', label: 'Meals', icon: '▤' },
-  { href: '/agent', label: 'Log', icon: '＋', primary: true },
-  { href: '/analytics', label: 'Trends', icon: '▲' },
-  { href: '/about', label: 'You', icon: '☺' },
-]
+  { href: '/home', label: 'Today', icon: 'home' },
+  { href: '/meals', label: 'Meals', icon: 'meals' },
+  { href: '/agent', label: 'Log', icon: 'plus' },
+  { href: '/analytics', label: 'Trends', icon: 'trends' },
+  { href: '/about', label: 'You', icon: 'user' },
+] as const
 
 export function BottomNav() {
   const path = usePathname()
+
   return (
-    <nav
-      className="fixed inset-x-0 bottom-0 z-50 border-t backdrop-blur"
-      style={{
-        borderColor: 'var(--color-line)',
-        background: 'color-mix(in oklch, var(--color-surface) 92%, transparent)',
-        paddingBottom: 'env(safe-area-inset-bottom)',
-      }}
-    >
-      <div className="mx-auto flex max-w-[640px] items-stretch justify-around">
+    <nav className="fixed inset-x-0 bottom-0 z-50 border-t pb-[env(safe-area-inset-bottom)]" style={{ borderColor: 'var(--color-line)', background: 'var(--color-surface)' }} aria-label="Main navigation">
+      <div
+        className="mx-auto flex max-w-[720px] items-center justify-around px-1 py-1"
+      >
         {TABS.map((tab) => {
           const active = path.startsWith(tab.href)
           return (
@@ -31,24 +26,34 @@ export function BottomNav() {
               key={tab.href}
               href={tab.href}
               aria-current={active ? 'page' : undefined}
-              className="flex flex-1 flex-col items-center gap-1 py-3 text-[11px]"
-              style={{ color: active ? 'var(--color-accent)' : 'var(--color-tx2)' }}
+              aria-label={tab.label}
+              className="relative flex min-h-16 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl text-[13px] font-semibold transition-colors"
+              style={{ color: active ? 'var(--color-accent-strong)' : 'var(--color-tx2)' }}
             >
               <span
-                className={tab.primary ? 'grid h-9 w-9 place-items-center rounded-full' : ''}
-                style={
-                  tab.primary
-                    ? { background: 'var(--color-accent)', color: 'var(--color-bg)', fontSize: 20 }
-                    : { fontSize: 18 }
-                }
+                className="grid h-7 w-10 place-items-center rounded-xl"
+                style={active ? { background: 'var(--color-accent-soft)' } : undefined}
               >
-                {tab.icon}
+                <NavIcon name={tab.icon} />
               </span>
-              {!tab.primary && tab.label}
+              <span>{tab.label}</span>
             </Link>
           )
         })}
       </div>
     </nav>
+  )
+}
+
+function NavIcon({ name }: { name: typeof TABS[number]['icon'] }) {
+  const common = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+      {name === 'home' && <><path {...common} d="m3.5 10.8 8.5-7 8.5 7" /><path {...common} d="M5.5 9.5v10h13v-10M9.5 19.5v-6h5v6" /></>}
+      {name === 'meals' && <><path {...common} d="M5 4.5h14v15H5z" /><path {...common} d="M8 8h8M8 12h8M8 16h5" /></>}
+      {name === 'plus' && <><path {...common} d="M12 6v12M6 12h12" /></>}
+      {name === 'trends' && <><path {...common} d="M4 19V5M4 19h16" /><path {...common} d="m7 15 4-4 3 2 5-6" /></>}
+      {name === 'user' && <><circle {...common} cx="12" cy="8" r="3.5" /><path {...common} d="M5.5 20c.8-4 3-6 6.5-6s5.7 2 6.5 6" /></>}
+    </svg>
   )
 }

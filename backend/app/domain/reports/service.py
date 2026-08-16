@@ -105,10 +105,14 @@ async def macros(
     """
     rows = await _rows(user_id, date_from, date_to)
     buckets: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    logged_days: set[str] = set()
+    unaccounted = 0
     for row in rows:
         nutrients = row.get("nutrients") or {}
         if not nutrients:
+            unaccounted += 1
             continue
+        logged_days.add(row["meal_date"])
         key = _bucket(date.fromisoformat(row["meal_date"]), group_by)
         for macro in MACROS:
             buckets[key][macro] += float(nutrients.get(macro, 0) or 0)
@@ -131,6 +135,8 @@ async def macros(
     return {
         "group_by": group_by,
         "series": series,
+        "logged_days": len(logged_days),
+        "unaccounted_items": unaccounted,
         "amdr_reference": {"carbs": [45, 65], "fat": [20, 35], "protein": [10, 35]},
     }
 
@@ -146,8 +152,15 @@ async def micros(
     rows = await _rows(user_id, date_from, date_to)
     days = max((date_to - date_from).days + 1, 1)
     totals: dict[str, float] = defaultdict(float)
+    logged_days: set[str] = set()
+    unaccounted = 0
     for row in rows:
-        for key, value in (row.get("nutrients") or {}).items():
+        nutrients = row.get("nutrients") or {}
+        if not nutrients:
+            unaccounted += 1
+            continue
+        logged_days.add(row["meal_date"])
+        for key, value in nutrients.items():
             if key in RDA:
                 try:
                     totals[key] += float(value)
@@ -182,6 +195,8 @@ async def micros(
         "basis": "ICMR-NIN 2020",
         "sex": sex,
         "days": days,
+        "logged_days": len(logged_days),
+        "unaccounted_items": unaccounted,
         "watchlist": watchlist,
         "panel": sorted(panel, key=lambda p: p["nutrient"]),
     }

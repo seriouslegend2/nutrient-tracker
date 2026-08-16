@@ -90,8 +90,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ weight_kg, waist_cm }),
     }),
-  weightHistory: (page = 1) =>
-    request<Page<BodyMetric>>(`/me/body-metrics${qs({ page })}`),
+  weightHistory: (params: Record<string, unknown> = {}) =>
+    request<Page<BodyMetric>>(`/me/body-metrics${qs(params)}`),
 
   portions: () => request<Page<CategoryPortion>>('/me/portions'),
   setPortion: (category: string, body: Record<string, unknown>) =>
@@ -141,7 +141,7 @@ export const api = {
 
   logWater: (volume_ml: number) =>
     request('/water', { method: 'POST', body: JSON.stringify({ volume_ml }) }),
-  water: (page = 1) => request<Page<WaterLog>>(`/water${qs({ page })}`),
+  water: (params: Record<string, unknown> = {}) => request<Page<WaterLog>>(`/water${qs(params)}`),
 
   sendMessage: (form: FormData) =>
     request<Message[]>('/messages', { method: 'POST', body: form }),
@@ -291,12 +291,29 @@ export type Trend = {
 }
 
 export type Macros = {
-  series: Record<string, number | Record<string, number> | string>[]
+  group_by: string
+  series: MacroSeriesPoint[]
+  logged_days: number
+  unaccounted_items: number
   amdr_reference: Record<string, number[]>
+}
+
+export type MacroSeriesPoint = {
+  bucket: string
+  calories_kcal: number
+  protein_g: number
+  carbs_g: number
+  fat_g: number
+  fiber_g: number
+  pct_of_energy: { protein: number; carbs: number; fat: number }
 }
 
 export type Micros = {
   basis: string
+  sex: string
+  days: number
+  logged_days: number
+  unaccounted_items: number
   watchlist: MicroRow[]
   panel: MicroRow[]
 }
