@@ -135,3 +135,38 @@ async def test_update_tool_rejects_an_already_resolved_meal(monkeypatch) -> None
     )
 
     assert result == {"status": "ERROR", "message": "Meal is already resolved"}
+
+
+async def test_create_tool_rejects_placeholder_names() -> None:
+    result = await tools.create_global_dish.ainvoke(
+        {
+            "canonical_name": "dish1",
+            "category": "fruit",
+            "nutrients_per_unit": {"protein_g": 1, "carbs_g": 10, "fat_g": 1},
+        },
+        config={"configurable": {"user_id": "user-1"}},
+    )
+
+    assert result["status"] == "ERROR"
+    assert "Generic" in result["message"]
+
+
+async def test_update_tool_rejects_placeholder_meal_even_if_model_matches(monkeypatch) -> None:
+    async def meal(_user_id: str, _meal_id: str) -> dict[str, Any]:
+        return {
+            "id": "meal-1",
+            "is_active": True,
+            "food_id": None,
+            "dish_name": "dish1",
+            "portions": 1,
+        }
+
+    monkeypatch.setattr(tools.meal_repo, "get_meal", meal)
+
+    result = await tools.update_meal_resolution.ainvoke(
+        {"meal_id": "meal-1", "food_id": "dish-1"},
+        config={"configurable": {"user_id": "user-1", "meal_id": "meal-1"}},
+    )
+
+    assert result["status"] == "ERROR"
+    assert "placeholder" in result["message"]

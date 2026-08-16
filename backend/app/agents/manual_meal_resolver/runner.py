@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import time
 from typing import Any, Literal
 
@@ -26,16 +25,6 @@ from app.domain.messages import repository as message_repo
 from app.services.prompts import trace_agent
 from app.tools.manual_meal_resolver_tools import update_meal_resolution
 from app.utils.logger import logger
-
-_PLACEHOLDER_DISH = re.compile(
-    r"^(?:dish|food|item|meal|test|sample|unknown|abc|xyz)[\s_-]*\d*$",
-    re.IGNORECASE,
-)
-
-
-def is_placeholder_dish_name(value: str) -> bool:
-    """Reject obvious test labels before they can mutate or map the catalog."""
-    return bool(_PLACEHOLDER_DISH.fullmatch(value.strip()))
 
 
 async def _record_run(row: dict[str, Any]) -> None:
@@ -95,14 +84,6 @@ async def run_manual_meal_resolver(
 ) -> ResolvedManualDish | None:
     """Resolve manual text and atomically map the already-created meal row."""
     if not settings.ai_enabled:
-        return None
-    if is_placeholder_dish_name(dish_name):
-        logger.info(
-            "manual_meal_placeholder_unresolved user_id={} meal_id={} dish={}",
-            user_id,
-            meal_id,
-            dish_name,
-        )
         return None
     started = time.perf_counter()
     prompt_name = prompt_version = prompt_source = None

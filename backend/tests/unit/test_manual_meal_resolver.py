@@ -355,3 +355,31 @@ async def test_runner_trusts_tool_results_over_reframed_final_action(monkeypatch
         action="create_new",
         updated_meal_id="meal-2",
     )
+
+
+async def test_placeholder_name_is_sent_to_model_and_remains_unresolved(monkeypatch) -> None:
+    _setup(monkeypatch)
+    called = False
+
+    async def resolve(_resolver_input, *, user_id: str):
+        nonlocal called
+        called = True
+        assert user_id == "user-1"
+        return (
+            ManualResolution(
+                action="unresolved",
+                confidence="high",
+                reason="The name is a placeholder, not a food identity.",
+            ),
+            ResolvedPrompt(name="manual-meal-resolver-v1", text="prompt", source="code"),
+            SimpleNamespace(usage=None),
+        )
+
+    monkeypatch.setattr(runner, "resolve_manual_meal", resolve)
+
+    result = await runner.run_manual_meal_resolver(
+        user_id="user-1", meal_id="meal-1", dish_name="dish1", servings=1
+    )
+
+    assert called
+    assert result is None

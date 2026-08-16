@@ -30,7 +30,12 @@ _GENERIC_MEAL_WORDS = {
 
 def _is_generic_meal_name(value: str) -> bool:
     words = set(re.findall(r"[a-z0-9]+", value.lower()))
-    return not words or bool(words & _GENERIC_MEAL_WORDS)
+    placeholder = re.fullmatch(
+        r"(?:dish|food|item|meal|test|sample|unknown|abc|xyz)[\s_-]*\d*",
+        value.strip(),
+        re.IGNORECASE,
+    )
+    return not words or bool(words & _GENERIC_MEAL_WORDS) or placeholder is not None
 
 
 def _context(config: RunnableConfig) -> tuple[str | None, str | None]:
@@ -107,6 +112,11 @@ async def update_meal_resolution(
         return {"status": "ERROR", "message": "Active meal was not found"}
     if current.get("food_id"):
         return {"status": "ERROR", "message": "Meal is already resolved"}
+    if _is_generic_meal_name(str(current.get("dish_name") or "")):
+        return {
+            "status": "ERROR",
+            "message": "Generic or placeholder meal descriptions cannot be mapped",
+        }
     dish = await dish_repo.get_dish(food_id)
     if not dish:
         return {"status": "ERROR", "message": "Global dish was not found"}
