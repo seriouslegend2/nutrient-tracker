@@ -5,7 +5,7 @@ depends on A at build or runtime.
 
 ```text
 supabase/config.toml
-  -> supabase/migrations/*.sql (12 ordered migrations)
+  -> supabase/migrations/*.sql (15 ordered migrations)
        -> Postgres tables, functions, triggers, indexes, grants, RLS
        -> backend/app/services/supabase.py
 
@@ -27,10 +27,11 @@ backend/app/domain/{dishes,meals,goals,profile,reports,water,messages}/**
   -> backend/app/agents/nutrition_chat/{agent,runner,tools,middleware,models,prompt,render,state}.py
   -> backend/app/api/v1/messages_router.py
 
-customer email/password signup or login
-  -> customer-app/app/api/auth/{signup,login}/route.ts
+customer Google signup or login
+  -> customer-app/app/api/auth/google/route.ts
   -> customer-app/src/lib/supabase/server.ts
-  -> optional customer email-confirmation code exchange at /auth/callback
+  -> Google account chooser (`prompt=select_account`)
+  -> customer OAuth code exchange at /auth/callback
   -> Supabase Auth session in secure httpOnly cookies
   -> customer-app/app/api/**/route.ts
   -> user-specific HS256 backend bearer
@@ -79,7 +80,8 @@ customer or dashboard logout
   dish rows. Category defaults come from migration 10 in the order above.
   There is no demo-user seed.
 - The only implemented agents are `nutrition_chat` and `media_extraction`.
-- The customer application owns account signup and optional email confirmation.
+- The customer application uses Google OAuth for both first-time signup and
+  returning-user login. It exposes no customer email/password or OTP routes.
   The dashboard is sign-in-only; access requires an operator-granted `admin`
   row in `user_roles` after the account has signed in once.
 - A supplied service-role key was exposed and must be rotated. Actual local
@@ -92,7 +94,7 @@ customer or dashboard logout
 pgvector/pgvector:pg17 container
   -> tests/integration/test_database.py
   -> empty database bootstrap
-  -> all 12 migrations
+  -> all 15 migrations
   -> formula, safety, versioning, grant, and schema tests
 
 backend source -> Ruff -> configured mypy scope -> import-linter -> pytest
@@ -102,6 +104,6 @@ both frontends  -> scripts/check-frontend-isolation.sh
 
 CI starts the Postgres container and sets `NT_REQUIRE_DATABASE=1` and
 `NT_FAIL_ON_SKIP=1`, so unavailable or skipped database tests fail the job.
-The local 2026-08-16 verification reported 68 backend tests, 27 customer auth
+The local 2026-08-16 verification reported 98 backend tests, 31 customer
 tests, 22 dashboard tests, and zero production vulnerabilities in both frontend
 audits. Both frontend lockfiles resolve Next.js 16.3.1.

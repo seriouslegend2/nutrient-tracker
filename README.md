@@ -8,14 +8,14 @@ Supabase/Postgres database.
 
 The implemented customer flow includes:
 
-- Customer email/password signup and login through Supabase Auth, logout, and
-  required first-run onboarding.
-- Manual meal logging by date and meal type, substring dish search, free-text
-  fallback, portion resolution, and version-preserving edit/delete operations.
-- Goal preview and creation for nutrient, body-weight, item, hydration, and
-  behaviour goals, including calorie floors, rate clamps, BMI checks, and
-  pregnancy/medical-condition guards.
-- Daily calorie/macro totals, goal progress, hydration logging/history, weight
+- One-click customer signup and login through Supabase Google OAuth, logout,
+  and required first-run onboarding.
+- Manual meal logging by date and meal type, substring dish search, category/
+  household serving resolution, and version-preserving serving-count edits/deletes.
+- Concurrent daily, weekly, monthly, and fixed-period goals for weight, protein,
+  hydration, and explicit training check-ins, including calorie floors, rate
+  clamps, BMI checks, protein/hydration guards, and medical-condition guards.
+- Daily calorie/macro totals, per-goal Today/period/calendar progress, hydration logging/history, weight
   history, and day/week/month charts for calories, macros, micronutrients, and
   goal-versus-actual values.
 - An optional `nutrition_chat` agent for conversational reads and explicitly
@@ -47,10 +47,11 @@ application data always goes through their route-handler BFFs and FastAPI.
 
 Authentication has two stages:
 
-1. The customer BFF handles email/password signup and login. If hosted email
-   confirmation is enabled, only the customer callback exchanges the
-   confirmation code. The dashboard is sign-in-only for existing accounts and
-   does not need a callback. Both apps support logout. Their server-side
+1. The customer BFF starts Google OAuth with `prompt=select_account`, so Google
+   displays the accounts currently signed into the browser. Supabase creates a
+   new auth user for a first-time Google identity or signs in the existing one,
+   then the customer callback exchanges the code server-side. The dashboard
+   remains a separate sign-in-only operator surface. Both apps support logout. Their server-side
    Supabase session bridges keep auth tokens in `httpOnly`, `sameSite=lax`, and
    production-`secure` cookies; no service-role key is present in either
    frontend.
@@ -81,7 +82,7 @@ backend/app/
   services/               Supabase client, media provider I/O, identity
 customer-app/             Next.js customer UI and same-origin BFF routes
 internal-dashboard/       Next.js admin UI and same-origin BFF routes
-supabase/migrations/      12 ordered SQL migrations
+supabase/migrations/      15 ordered SQL migrations
 seeds/seed_dishes.py      optional 61-dish curated starter seed
 ```
 
@@ -126,21 +127,22 @@ cp internal-dashboard/.env.example internal-dashboard/.env.local
   Replace the placeholders after rotation; the checked-in examples deliberately
   remain generic.
 
-### Supabase Email Authentication
+### Supabase Google Authentication
 
-For a hosted Supabase project:
+Google OAuth does not require Supabase Pro, custom SMTP, email templates, or a
+separate application OTP.
 
-1. In Supabase Auth providers, enable the Email provider and permit email/password
-   signup.
-2. Choose whether hosted email confirmation is required. With confirmations
-   disabled, successful customer signup can create a session immediately.
-3. Only when confirmations are enabled, add
-   `http://localhost:3000/auth/callback` to Supabase Auth URL Configuration and
-   add the deployed customer callback before production use. The confirmation
-   link returns there for a server-side code exchange.
-4. Do not add a dashboard callback. The dashboard has no signup or confirmation
-   route; administrators sign in with an existing account created through the
-   customer application.
+1. In Google Cloud Console, configure an OAuth consent screen and create a Web
+   application OAuth client.
+2. Add `https://YOUR_PROJECT_REF.supabase.co/auth/v1/callback` as an authorized
+   redirect URI in that Google client.
+3. In Supabase **Authentication > Providers > Google**, enable Google and enter
+   the client ID and client secret.
+4. In Supabase **Authentication > URL Configuration**, set the Site URL to the
+   customer origin and allow `http://localhost:3000/auth/callback` for local
+   development plus the equivalent deployed callback.
+5. The customer button opens Google's account chooser. New identities sign up;
+   existing identities sign in; both return through `/auth/callback`.
 
 After customer signup or first login, the auth-user bootstrap creates the
 application user and customer role. The customer app then requires first-run
@@ -249,7 +251,7 @@ creates goals, meals, hydration, weight, profile, and portion records.
 Setup probes all required product tables and non-agent RPCs before opening the
 apps. A missing hosted migration fails with the table/RPC and migration filename
 instead of producing misleading browser failures. The optional curated dish
-scenario is reported as skipped when seed rows do not exist; free-text meal
+scenario is reported as skipped when seed rows do not exist; serving-count meal
 coverage remains mandatory.
 
 `npm run e2e` is an orchestrator: Playwright's exit code remains authoritative,
@@ -259,9 +261,9 @@ sanitized environment/project reference, failures, timestamp, and embedded
 screenshots. It never turns a failed hosted run into a passing one.
 
 The checked-in evidence was generated on 2026-08-16 from a successful real run:
-all 14 non-agent scenarios passed in 1.8 minutes, producing 16 named screenshots
-and the 8-page `artifacts/e2e-report.pdf`. The two provisioned auth users were
-deleted after verification.
+all 15 non-agent scenarios passed in 2.3 minutes, producing 17 named screenshots
+and the 9-page `artifacts/e2e-report.pdf`. All provisioned auth users were deleted
+after verification.
 
 Normal push and pull-request CI does not access hosted secrets. The
 `workflow_dispatch` input `run_hosted_e2e` opt-in starts all three services only
@@ -277,9 +279,9 @@ docker run --rm -d --name nt-verify \
 docker stop nt-verify
 ```
 
-On 2026-08-16, that complete suite applied all 12 migrations to an empty
-Supabase-shaped Postgres 17 database and reported `69 passed`. The customer auth
-test suite reported `27 passed`, the dashboard suite reported `22 passed`, and
+On 2026-08-16, that complete suite applied all 15 migrations to an empty
+Supabase-shaped Postgres 17 database and reported `98 passed`. The customer
+test suite reported `31 passed`, the dashboard suite reported `22 passed`, and
 `npm audit --omit=dev` reported zero production vulnerabilities in each
 frontend. See `STATUS.html` for the other commands run and the exact boundary of
 that evidence.
@@ -301,18 +303,18 @@ that evidence.
   it is not automatic image classification.
 - The customer app has a web manifest but no service worker/offline mode. It has
   no account export or self-service account deletion.
-- There is no dedicated post-onboarding profile/preferences editor. Meal
-  corrections can save per-dish portions, and the backend exposes additional
-  preference and portion endpoints.
+- Household category serving sizes are edited under **You → Your portions**.
+  Meal creation and correction only choose a serving count; customers cannot
+  redefine grams or create per-dish portion overrides from a meal.
 - The dashboard intentionally has no user search/filter/sort, food-database
   editor, body-history/audit panels, or account mutation tools.
 - Frontend types are maintained locally; no generated OpenAPI client/type
   package is checked in.
 - Both frontends have focused Vitest coverage for redirect validation, backend
   JWT generation, API clients, pagination, and dashboard panel contracts. The
-  checked-in Playwright suite and evidence cover real hosted non-agent browser
-  flows. Self-service email confirmation, direct-client RLS, and live OpenAI
-  provider calls remain separate verification work.
+  checked-in Playwright evidence predates the Google-only customer login change;
+  live Google provider and account-chooser verification, direct-client RLS, and
+  live OpenAI provider calls remain separate verification work.
 
 This is a nutrition tracking tool, not medical advice. Safety rules refuse or
 clamp risky goals but do not replace clinical guidance.

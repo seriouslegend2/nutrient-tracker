@@ -80,4 +80,20 @@ describe('customer API client', () => {
       body: { detail: 'Meal not found', code: 'NOT_FOUND' },
     })
   })
+
+  it('uses the multi-goal summary, activity, and primary BFF routes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ goals: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.goalProgressSummary('2026-08-16')
+    await api.checkInGoalActivity('2026-08-16')
+    await api.makeGoalPrimary('goal-1')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/goals/progress/summary?as_of=2026-08-16', expect.any(Object))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/goals/activity/check-in', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ date: '2026-08-16', activity_type: 'training' }),
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/goals/goal-1/primary', expect.objectContaining({ method: 'POST' }))
+  })
 })

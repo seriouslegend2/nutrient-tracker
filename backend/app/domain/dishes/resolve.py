@@ -99,7 +99,7 @@ async def resolve_item(
         chain = await resolve_portion(user_id, food_id, category)
         nutrients = scale_nutrients(chain.get("per_100g") or {}, grams_override)
         return Resolution(
-            portion_unit=portion_unit_override or "g",
+            portion_unit=portion_unit_override or chain.get("portion_unit") or "g",
             portion_grams=grams_override,
             grams=grams_override,
             nutrients=nutrients,

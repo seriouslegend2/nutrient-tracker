@@ -10,12 +10,12 @@ unchecked.
 
 - [x] Revoke default `PUBLIC`, `anon`, and `authenticated` execution from
   privileged `SECURITY DEFINER` functions; grant execution to `service_role`.
-- [x] Validate customer email/password continuation paths and the optional
-  email-confirmation callback; document that the dashboard needs no callback.
+- [x] Validate customer Google OAuth continuation paths and the callback code
+  exchange; force Google's account chooser for every customer auth attempt.
 - [x] Fix the dashboard's post-login destination.
 - [x] Apply and document the cookie options used by the Supabase SSR bridge.
-- [x] Keep customer signup and dashboard sign-in server-side, make the dashboard
-  sign-in-only, and retain logout in both applications.
+- [x] Keep customer Google OAuth and dashboard sign-in server-side, make the
+  dashboard sign-in-only, and retain logout in both applications.
 - [x] Reconcile RLS with the service-role backend: repository scoping and RBAC
   are primary; RLS is defense in depth and is bypassed by backend calls.
 - [x] Add a reproducible pgvector/Postgres migration and integration-test path.
@@ -132,19 +132,19 @@ unchecked.
 
 The following commands completed locally on 2026-08-16:
 
-- Ruff check and format check: pass; 75 files already formatted.
+- Ruff check and format check: pass; 81 files already formatted.
 - Configured mypy scope: pass with no issues in 12 source files.
-- Import-linter: 4 contracts kept, 0 broken across 64 analyzed files.
-- Full pytest run with required pgvector/Postgres 17 database: `69 passed in
-  10.21s`; no skips; all 12 migrations applied from empty.
+- Import-linter: 4 contracts kept, 0 broken across 65 analyzed files.
+- Full pytest run with required pgvector/Postgres 17 database: `98 passed in
+  12.96s`; no skips; all 15 migrations applied from empty.
 - Customer application: TypeScript pass and Next.js production build pass.
 - Internal dashboard: TypeScript pass and Next.js production build pass.
-- Customer auth Vitest suite: 27 passed; dashboard Vitest suite: 22 passed.
+- Customer Vitest suite: 31 passed; dashboard Vitest suite: 22 passed.
 - Root E2E strict TypeScript check passed, evidence-report tests reported `3
-  passed`, and Playwright statically discovered 14 hosted Chromium scenarios.
-- Playwright Chromium completed the real hosted non-agent suite against Supabase
-  Auth/PostgREST and all three local services: `14 passed` in 1.8 minutes, with
-  16 named screenshots and an 8-page HTML/PDF evidence report.
+  passed`, and Playwright statically discovered 15 hosted Chromium scenarios.
+- Playwright Chromium completed the current real hosted non-agent suite against
+  Supabase Auth/PostgREST and all three local services: `15 passed` in 2.3
+  minutes, with 17 named screenshots and a 9-page HTML/PDF evidence report.
 - Both frontend production dependency audits: 0 vulnerabilities after the
   Next.js 16.3.1 upgrade.
 - Frontend isolation script: pass.
@@ -158,12 +158,12 @@ deployment succeeded.
 - [ ] Rotate the exposed Supabase service-role key, generate a replacement
   shared JWT secret, and replace the local placeholders. Blocker: credential
   rotation and secret delivery must be completed by a Supabase project operator.
-- [x] Apply all 12 migrations and the optional 61-dish seed to hosted Supabase;
+- [x] Apply the hosted schema and optional 61-dish seed to Supabase;
   validate required tables/RPCs through service-role PostgREST and exercise real
   Supabase sessions plus BFF-issued user JWTs.
-- [x] Enable the Supabase Email provider and complete hosted customer and
-  dashboard email/password signin. Self-service signup and the confirmation
-  callback remain unverified because E2E securely provisions confirmed users.
+- [ ] Enable the Supabase Google provider and complete hosted customer OAuth
+  signup/login with account selection and callback exchange. Existing browser
+  evidence predates the Google-only customer login change.
 - [x] Complete dashboard sign-in/logout, denial without the `admin` role, and
   access after setup grants the role in `user_roles`.
 - [ ] Verify direct authenticated-client own-row RLS behavior separately. The
@@ -173,6 +173,8 @@ deployment succeeded.
   across image, label-hinted image, audio, and PDF inputs. Blocker: no provider
   API credential was used; current evidence covers code paths with mocked
   provider output only.
-- [x] Drive the checked-in non-agent Playwright login/onboarding/goal/meal/water/
+- [x] Drive the baseline non-agent Playwright login/onboarding/goal/meal/water/
   report/profile/admin suite against hosted Supabase and all three configured
   services: 14 passed with screenshot and PDF evidence.
+- [x] Re-run the 15-scenario suite after deploying the category-portion and
+  multi-goal migrations; all scenarios passed and temporary users were removed.

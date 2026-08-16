@@ -32,7 +32,7 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
 <header>
   <h1>Current Product and Deferred Plan</h1>
   <p>This is a post-remediation scope record. It separates what exists in the repository from intentional backlog; it is not a promise that every original design idea shipped.</p>
-  <div class="meta"><span class="pill">reconciled 2026-08-16</span><span class="pill">12 migrations</span><span class="pill">68 backend tests</span><span class="pill">2 implemented agents</span></div>
+  <div class="meta"><span class="pill">reconciled 2026-08-16</span><span class="pill">15 migrations</span><span class="pill">98 backend tests</span><span class="pill">2 implemented agents</span></div>
 </header>
 
 <section>
@@ -56,7 +56,7 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
        -> server-side Supabase service-role client
   -> Postgres 17</pre>
 <p>The browser uses same-origin application routes for product data. The public Supabase URL and anon key configure email/password authentication and session handling, while the service-role credential exists only in FastAPI and the offline seed script. FastAPI's service-role calls bypass RLS, so repository user scoping and backend RBAC are the primary authorization boundary. RLS is enabled as defense in depth for non-service-role database paths.</p>
-<p>Customer signup/login and dashboard login run through server routes. If hosted email confirmation is enabled, the customer-only callback exchanges the confirmation code server-side; the sign-in-only dashboard needs no callback. The session bridge applies HTTP-only, same-site, and production-secure cookie options, and both apps implement logout. BFF-to-FastAPI bearers contain <code>user_id</code>, have no expiry claim, and are signed with matching server-only secrets in the backend and both BFFs.</p>
+<p>Customer signup/login uses Google OAuth through a server route with <code>prompt=select_account</code>. Google lists accounts already signed into the browser; Supabase creates a first-time identity or signs in the existing identity, and the customer callback exchanges the OAuth code server-side. The dashboard remains a separate sign-in-only operator surface. The session bridge applies HTTP-only, same-site, and production-secure cookie options, and both apps implement logout. BFF-to-FastAPI bearers contain <code>user_id</code>, have no expiry claim, and are signed with matching server-only secrets in the backend and both BFFs.</p>
 <div class="card deferred"><p>A supplied service-role key was exposed and must be rotated before use. Its value must never appear in documentation or frontend configuration. Actual local environment files contain public project values and placeholders for the rotated service-role and replacement JWT secrets; checked-in examples stay generic.</p></div>
 </section>
 
@@ -80,10 +80,10 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
 <table>
 <thead><tr><th>Area</th><th>Current implementation</th></tr></thead>
 <tbody>
-<tr><td>Identity</td><td>Customer email/password signup/login, optional hosted email-confirmation callback, safe continuation paths, logout, first-run onboarding gate, and app-user bootstrap migration.</td></tr>
+<tr><td>Identity</td><td>One-click customer Google signup/login with forced account chooser, safe continuation paths, logout, first-run onboarding gate, and app-user bootstrap migration.</td></tr>
 <tr><td>Onboarding</td><td>Required demographic/body validation, activity/diet/allergy/timing inputs, seven optional portion questions, safety disclosures, then goal preview/create or skip.</td></tr>
-<tr><td>Meals</td><td>Six meal types; date browsing; manual substring dish search; free-text fallback; exact grams or portions; provenance; edit/delete with coherent day versions.</td></tr>
-<tr><td>Portions</td><td>Meal value, user dish override, user category override, global dish, global category, then unknown. The chosen level is persisted.</td></tr>
+<tr><td>Meals</td><td>Six meal types; date browsing; manual substring dish search; category/household serving resolution; serving-count selection; provenance; edit/delete with coherent day versions.</td></tr>
+<tr><td>Portions</td><td>Customers choose serving counts on meals. Household serving-size changes are category-level settings under Your portions; global dish/category data supplies the fallback.</td></tr>
 <tr><td>Goals</td><td>Nutrient, body-weight, item, hydration, and behaviour goals; preview; activate/deactivate; BMI/BMR/TDEE refresh; calorie/rate safety controls.</td></tr>
 <tr><td>Reports</td><td>Daily/weekly/monthly calorie and macro series, 18-micronutrient panel/watchlist, goal comparison, weight history, unknown-item counts.</td></tr>
 <tr><td>Hydration</td><td>250 ml quick logging, target progress when available, and recent daily history.</td></tr>
@@ -107,13 +107,13 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
 
 <section>
 <h2>Implemented Dashboard</h2>
-<p>The dashboard is sign-in-only: existing accounts authenticate with email/password, and new accounts are created in the customer application. The admin UI verifies the signed-in user at the BFF, checks the backend-provided admin role in the UI, and relies on FastAPI permission checks for enforcement. Dashboard access is granted by inserting the <code>admin</code> role in <code>user_roles</code> after the account has signed in once. Logout clears the local Supabase session. The dashboard provides server-paginated users and per-user overview, meals, goals, preferences, conversations, and agent-run panels. Aggregate cards cover users, recent meals, agent success/latency when runs exist, and portion-resolution mix.</p>
+<p>The dashboard is sign-in-only for separately provisioned operator accounts. The admin UI verifies the signed-in user at the BFF, checks the backend-provided admin role in the UI, and relies on FastAPI permission checks for enforcement. Dashboard access is granted by inserting the <code>admin</code> role in <code>user_roles</code>. Logout clears the local Supabase session. The dashboard provides server-paginated users and per-user overview, meals, goals, preferences, conversations, and agent-run panels. Aggregate cards cover users, recent meals, agent success/latency when runs exist, and portion-resolution mix.</p>
 <p>User search, filtering, sorting, account mutation, body-history, progress, audit, and food-database administration are not implemented.</p>
 </section>
 
 <section>
 <h2>Data And Migrations</h2>
-<p>Twelve ordered migrations define identity/profile tables, global and user dish portions, meals, goals, preferences, water logs, communications, agent runs, audits, formulas, atomic versioning RPCs, triggers, grants, and RLS. An auth trigger creates <code>app_users</code> and the customer role from <code>auth.users</code>.</p>
+<p>Fifteen ordered migrations define identity/profile tables, global and user category portions, meals, concurrent cadence-aware goals, explicit activity logs, preferences, water logs, communications, agent runs, audits, formulas, atomic versioning RPCs, triggers, grants, and RLS. An auth trigger creates <code>app_users</code> and the customer role from <code>auth.users</code>.</p>
 <p>The migration seed supplies all 18 category defaults. The optional Python seed contains 61 curated as-entered dish rows and no demo account. It is a starter corpus, not a full national or commercial food database.</p>
 </section>
 
@@ -130,7 +130,6 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
   <li>Advanced projections, arbitrary report-range controls, full operational analytics, and additional admin panels.</li>
   <li>Account export, self-service account deletion, offline/service-worker behavior, and a general profile/preferences editor.</li>
   <li>Generated OpenAPI client types. Frontends currently maintain local interfaces.</li>
-  <li>Browser automation against hosted Supabase email authentication. Focused frontend unit suites are implemented.</li>
 </ul>
 </div>
 </section>
@@ -141,10 +140,10 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
   <li>Keep Ruff, configured mypy, import-linter, backend tests, frontend typechecks, and frontend isolation green in CI.</li>
   <li>Require pgvector/Postgres in CI, apply all migrations from empty, and fail if integration tests skip.</li>
   <li>Before deployment, rotate the exposed service-role key, create a new shared JWT secret, link a disposable hosted Supabase project, and verify migration push, PostgREST, auth bootstrap, and real policy behavior.</li>
-  <li>Enable Supabase Email authentication and drive customer signup/signin, optional email confirmation, first-run onboarding, logout, dashboard sign-in, role denial, and admin-role access. Allow <code>http://localhost:3000/auth/callback</code> only when confirmations are enabled; the dashboard needs no callback.</li>
+  <li>Configure a Google Web OAuth client, enable the Supabase Google provider, allow the Supabase Auth callback in Google, and allow the customer <code>/auth/callback</code> in Supabase URL Configuration. Drive first-time Google signup, returning-user login, account selection, onboarding, logout, dashboard sign-in, role denial, and admin-role access.</li>
   <li>With an OpenAI credential, exercise live chat, photo, label-hinted photo, audio, and PDF paths, including failed and confirmed drafts.</li>
 </ol>
-<p>Steps 3-5 remain external runtime verification, not completed product evidence. Local evidence is 12 migrations, 68 backend tests, 27 customer auth tests, 22 dashboard tests, Next.js 16.3.1 in both lockfiles, and zero production vulnerabilities from both frontend audits.</p>
+<p>Steps 3-5 remain external runtime verification, not completed product evidence. Local evidence is 15 migrations, 98 backend tests, 31 customer tests, 22 dashboard tests, Next.js 16.3.1 in both lockfiles, and zero production vulnerabilities from both frontend audits. The hosted non-agent suite passes all 15 scenarios.</p>
 </section>
 </main></body>
 </html>

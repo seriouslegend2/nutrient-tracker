@@ -116,7 +116,7 @@ def fresh_database() -> None:
             '{USER_ID}', 'male', '1990-01-01', 175, 'moderate', 'vegetarian');
         INSERT INTO body_metrics (user_id, weight_kg)
         VALUES ('{USER_ID}', 70);
-        SELECT count(*) FROM fn_create_goal(
+        SELECT count(*) FROM fn_create_goal_v2(
             '{USER_ID}', 'hydration', '{{}}'::jsonb,
             CURRENT_DATE, CURRENT_DATE + 30);
         """
@@ -217,7 +217,7 @@ def test_nutrient_preview_and_create_clamp_sub_800_request() -> None:
     assert float(calories["value"]) >= 800
 
     stored = psql(
-        f"""SELECT daily_targets->'targets'->0->>'value' FROM fn_create_goal(
+        f"""SELECT daily_targets->'targets'->0->>'value' FROM fn_create_goal_v2(
             '{USER_ID}', 'nutrient',
             '{{"direction":"at_most","nutrients":{{"calories_kcal":500}}}}'::jsonb,
             CURRENT_DATE, CURRENT_DATE + 7);"""
@@ -278,15 +278,88 @@ def test_target_bmi_and_medical_condition_guards() -> None:
 def test_behaviour_goal_counts_distinct_logged_days() -> None:
     target = json.loads(
         psql(
-            f"""SELECT daily_targets::text FROM fn_resolve_goal_targets(
+            f"""SELECT daily_targets::text FROM fn_resolve_goal_targets_v2(
             '{USER_ID}', 'behaviour',
-            '{{"metric":"days_logged","target":3}}'::jsonb,
+            '{{"metric":"training_days","target":3}}'::jsonb,
             CURRENT_DATE, CURRENT_DATE + 6);"""
         )
     )["targets"][0]
-    assert target["metric"] == "days_logged"
-    assert target["scope"] == "count"
-    assert float(target["value"]) == pytest.approx(3 / 7, abs=0.0001)
+    assert target["metric"] == "training_days"
+    assert target["scope"] == "activity"
+    assert float(target["value"]) == 3
+
+
+def test_protein_goal_is_clamped_to_weight_based_baseline() -> None:
+    row = json.loads(
+        psql(
+            f"""SELECT jsonb_build_object(
+                'targets', daily_targets, 'derivation', derivation)::text
+            FROM fn_resolve_goal_targets_v2(
+                '{USER_ID}', 'nutrient',
+                '{{"nutrients":{{"protein_g":20}},"direction":"at_least"}}'::jsonb,
+                CURRENT_DATE, CURRENT_DATE + 6);"""
+        )
+    )
+    target = row["targets"]["targets"][0]
+    assert float(target["value"]) == 56
+    assert row["derivation"]["requested_protein_g"] == 20
+    assert row["derivation"]["applied_protein_g"] == 56
+    assert row["derivation"]["protein_floor_applied"] is True
+
+
+def test_extreme_hydration_minimum_has_a_recognizable_hint() -> None:
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            CONTAINER,
+            "psql",
+            "-U",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            f"""SELECT * FROM fn_resolve_goal_targets_v2(
+                '{USER_ID}', 'hydration', '{{"target_ml":10000}}'::jsonb,
+                CURRENT_DATE, CURRENT_DATE + 6);""",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "hydration_extreme" in result.stderr
+
+
+def test_pregnancy_guard_is_scoped_to_weight_goals() -> None:
+    psql(f"UPDATE user_profiles SET is_pregnant_or_nursing=true WHERE user_id='{USER_ID}';")
+    try:
+        protein = json.loads(
+            psql(
+                f"""SELECT daily_targets::text FROM fn_resolve_goal_targets_v2(
+                    '{USER_ID}', 'nutrient',
+                    '{{"nutrients":{{"protein_g":60}},"direction":"at_least"}}'::jsonb,
+                    CURRENT_DATE, CURRENT_DATE + 30);"""
+            )
+        )
+        hydration = json.loads(
+            psql(
+                f"""SELECT daily_targets::text FROM fn_resolve_goal_targets_v2(
+                    '{USER_ID}', 'hydration', '{{"target_ml":2000}}'::jsonb,
+                    CURRENT_DATE, CURRENT_DATE + 30);"""
+            )
+        )
+        assert protein["targets"][0]["metric"] == "protein_g"
+        assert hydration["targets"][0]["metric"] == "water_ml"
+        with pytest.raises(AssertionError):
+            psql(
+                f"""SELECT count(*) FROM fn_resolve_goal_targets_v2(
+                    '{USER_ID}', 'body_weight',
+                    '{{"direction":"lose","amount_kg":1}}'::jsonb,
+                    CURRENT_DATE, CURRENT_DATE + 90);"""
+            )
+    finally:
+        psql(f"UPDATE user_profiles SET is_pregnant_or_nursing=false WHERE user_id='{USER_ID}';")
 
 
 # ---------------------------------------------------------------------------
@@ -354,20 +427,30 @@ def test_structural_profile_edits_refresh_and_version_the_goal() -> None:
     before = psql(
         f"SELECT bmr_kcal || ',' || tdee_kcal FROM user_profiles WHERE user_id='{USER_ID}';"
     )
-    version = int(psql(f"SELECT version FROM goals WHERE user_id='{USER_ID}' AND is_active;"))
+    version = int(
+        psql(
+            f"SELECT version FROM goals WHERE user_id='{USER_ID}' "
+            "AND kind='hydration' AND is_active;"
+        )
+    )
     psql(f"UPDATE user_profiles SET height_cm=180 WHERE user_id='{USER_ID}';")
     after = psql(
         f"SELECT bmr_kcal || ',' || tdee_kcal FROM user_profiles WHERE user_id='{USER_ID}';"
     )
     assert after != before
     assert (
-        int(psql(f"SELECT version FROM goals WHERE user_id='{USER_ID}' AND is_active;"))
+        int(
+            psql(
+                f"SELECT version FROM goals WHERE user_id='{USER_ID}' "
+                "AND kind='hydration' AND is_active;"
+            )
+        )
         == version + 1
     )
     assert (
         psql(
             f"SELECT derivation->>'trigger_reason' FROM goals "
-            f"WHERE user_id='{USER_ID}' AND is_active;"
+            f"WHERE user_id='{USER_ID}' AND kind='hydration' AND is_active;"
         )
         == "profile_change"
     )
@@ -515,29 +598,137 @@ def test_preference_and_portion_swaps_are_versioned_atomically() -> None:
     )
 
 
-def test_exactly_one_active_goal_per_user_is_enforced() -> None:
-    count = psql(f"SELECT count(*) FROM goals WHERE user_id='{USER_ID}' AND is_active;")
-    assert int(count) <= 1
-
-    # and the partial unique index actually prevents a second one
-    err = subprocess.run(
-        [
-            "docker",
-            "exec",
-            CONTAINER,
-            "psql",
-            "-U",
-            "postgres",
-            "-tA",
-            "-c",
-            f"""INSERT INTO goals (user_id,kind,spec,starts_on,ends_on)
-             VALUES ('{USER_ID}','hydration','{{}}'::jsonb,CURRENT_DATE,CURRENT_DATE+1);""",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
+def test_multiple_active_goals_have_exactly_one_primary() -> None:
+    behaviour = psql(
+        f"""SELECT goal_id FROM fn_create_goal_v2(
+            '{USER_ID}', 'behaviour',
+            '{{"metric":"training_days","target":3}}'::jsonb,
+            CURRENT_DATE, CURRENT_DATE + 30, 'weekly', false);"""
     )
-    assert err.returncode != 0, "a second active goal should be rejected by the index"
+    assert int(psql(f"SELECT count(*) FROM goals WHERE user_id='{USER_ID}' AND is_active;")) >= 2
+    assert (
+        psql(f"SELECT count(*) FROM goals WHERE user_id='{USER_ID}' AND is_active AND is_primary;")
+        == "1"
+    )
+
+    with pytest.raises(AssertionError):
+        psql(f"SELECT count(*) FROM fn_set_goal_primary('{USER_ID}', '{behaviour}');")
+
+    weight = psql(
+        f"""SELECT goal_id FROM fn_create_goal_v2(
+            '{USER_ID}', 'body_weight',
+            '{{"direction":"lose","amount_kg":1}}'::jsonb,
+            CURRENT_DATE, CURRENT_DATE + 90, 'period', true);"""
+    )
+    assert (
+        psql(f"SELECT goal_id FROM goals WHERE user_id='{USER_ID}' AND is_active AND is_primary;")
+        == weight
+    )
+
+
+def test_legacy_goal_rpcs_preserve_other_active_goals() -> None:
+    before = int(psql(f"SELECT count(*) FROM goals WHERE user_id='{USER_ID}' AND is_active;"))
+    created = psql(
+        f"""SELECT goal_id FROM fn_create_goal(
+            '{USER_ID}', 'behaviour',
+            '{{"metric":"days_logged","target":2}}'::jsonb,
+            CURRENT_DATE, CURRENT_DATE + 14);"""
+    )
+    assert (
+        int(psql(f"SELECT count(*) FROM goals WHERE user_id='{USER_ID}' AND is_active;"))
+        == before + 1
+    )
+    psql(f"SELECT count(*) FROM fn_set_goal_active('{USER_ID}', '{created}', false);")
+    psql(f"SELECT count(*) FROM fn_set_goal_active('{USER_ID}', '{created}', true);")
+    assert (
+        int(psql(f"SELECT count(*) FROM goals WHERE user_id='{USER_ID}' AND is_active;"))
+        == before + 1
+    )
+
+
+def test_training_progress_uses_weekly_target_not_daily_multiplication() -> None:
+    goal_id = psql(
+        f"""SELECT goal_id FROM fn_create_goal_v2(
+            '{USER_ID}', 'behaviour',
+            '{{"metric":"training_days","target":3}}'::jsonb,
+            '2026-09-07', '2026-09-13', 'weekly', false);"""
+    )
+    psql(
+        f"INSERT INTO activity_logs (user_id, activity_date, activity_type) VALUES "
+        f"('{USER_ID}', '2026-09-08', 'training'), "
+        f"('{USER_ID}', '2026-09-10', 'training') ON CONFLICT DO NOTHING;"
+    )
+    progress = json.loads(
+        psql(f"SELECT fn_goal_progress('{goal_id}', '2026-09-07', '2026-09-13')::text;")
+    )
+    assert progress["cadence"] == "weekly"
+    assert float(progress["targets"][0]["target_to_date"]) == 3
+    assert float(progress["targets"][0]["actual_to_date"]) == 2
+
+
+def test_goal_period_is_bounded_in_writer_and_table() -> None:
+    with pytest.raises(AssertionError):
+        psql(
+            f"""SELECT count(*) FROM fn_create_goal_v2(
+                '{USER_ID}', 'behaviour',
+                '{{"metric":"training_days","target":3}}'::jsonb,
+                CURRENT_DATE, CURRENT_DATE + 2000, 'weekly', false);"""
+        )
+    with pytest.raises(AssertionError):
+        psql(
+            f"""INSERT INTO goals (
+                user_id, kind, spec, starts_on, ends_on, daily_targets,
+                derivation, status, version, is_active, cadence, is_primary)
+            VALUES ('{USER_ID}', 'behaviour', '{{}}', CURRENT_DATE,
+                CURRENT_DATE + 2000, '{{"targets":[]}}', '{{}}',
+                'active', 1, false, 'weekly', false);"""
+        )
+
+
+def test_activity_logs_are_explicit_and_unique_per_day_and_type() -> None:
+    activity_date = "2026-08-10"
+    psql(
+        f"INSERT INTO activity_logs (user_id, activity_date, activity_type) "
+        f"VALUES ('{USER_ID}', '{activity_date}', 'training');"
+    )
+    with pytest.raises(AssertionError):
+        psql(
+            f"INSERT INTO activity_logs (user_id, activity_date, activity_type) "
+            f"VALUES ('{USER_ID}', '{activity_date}', 'training');"
+        )
+    assert (
+        psql(
+            f"SELECT count(*) FROM activity_logs WHERE user_id='{USER_ID}' "
+            f"AND activity_date='{activity_date}' AND activity_type='training';"
+        )
+        == "1"
+    )
+
+
+def test_protein_goal_reresolves_after_significant_weight_change() -> None:
+    goal_id = psql(
+        f"""SELECT goal_id FROM fn_create_goal_v2(
+            '{USER_ID}', 'nutrient',
+            '{{"nutrients":{{"protein_g":20}},"direction":"at_least"}}'::jsonb,
+            CURRENT_DATE, CURRENT_DATE + 30, 'daily', false);"""
+    )
+    before_version = int(
+        psql(f"SELECT max(version) FROM goals WHERE user_id='{USER_ID}' AND goal_id='{goal_id}';")
+    )
+    psql(
+        f"INSERT INTO body_metrics (user_id, measured_on, weight_kg) "
+        f"VALUES ('{USER_ID}', CURRENT_DATE + 1, 73);"
+    )
+    current = json.loads(
+        psql(
+            f"""SELECT jsonb_build_object(
+                'version', version, 'derivation', derivation)::text
+            FROM goals WHERE user_id='{USER_ID}' AND goal_id='{goal_id}' AND is_active;"""
+        )
+    )
+    assert current["version"] == before_version + 1
+    assert current["derivation"]["weight_kg"] == 73
+    assert current["derivation"]["protein_floor_g"] == 58.4
 
 
 def test_versioning_never_deletes_history() -> None:
@@ -573,6 +764,7 @@ def test_all_expected_tables_exist() -> None:
         "goals",
         "user_preferences",
         "water_logs",
+        "activity_logs",
         "communication_master",
         "agent_runs",
         "audit_log",
@@ -586,7 +778,7 @@ def test_rls_is_enabled_on_every_user_owned_table() -> None:
              JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname='public' AND c.relkind='r' AND NOT c.relrowsecurity
               AND c.relname IN ('meals','goals','body_metrics','user_preferences',
-                                'water_logs','communication_master','dish_household',
+                                'water_logs','activity_logs','communication_master','dish_household',
                                 'category_household');"""
     )
     assert unprotected == "", f"RLS missing on: {unprotected}"
@@ -614,6 +806,16 @@ def test_security_definer_functions_are_service_role_only() -> None:
 def test_category_global_is_fully_seeded() -> None:
     count = psql("SELECT count(*) FROM category_global WHERE is_active;")
     assert int(count) == 18, "all 18 categories must be seeded - level 5 must always answer"
+
+
+def test_weight_based_categories_use_one_human_serving() -> None:
+    rows = psql(
+        """SELECT category || ':' || portion_unit || ':' || portion_grams || ':' || portion_count
+             FROM category_global
+            WHERE is_active AND category IN ('protein_main', 'paneer_tofu')
+            ORDER BY category::text;"""
+    ).splitlines()
+    assert rows == ["paneer_tofu:serving:100:1", "protein_main:serving:150:1"]
 
 
 def test_energy_is_never_stored_on_a_seeded_dish() -> None:

@@ -6,6 +6,7 @@ import { useRef, useState } from 'react'
 
 import { BottomNav } from '@/components/nav'
 import { api, type Message } from '@/lib/api-client'
+import { localDateISO } from '@/lib/date'
 
 /**
  * Text runs through the nutrition agent. Photos and voice notes run through
@@ -18,7 +19,7 @@ export function AgentClient() {
   const cameraRef = useRef<HTMLInputElement>(null)
   const [text, setText] = useState('')
   const [aiError, setAiError] = useState('')
-  const mealDate = params.get('date') ?? new Date().toISOString().slice(0, 10)
+  const mealDate = params.get('date') ?? localDateISO()
 
   const { data: messages } = useQuery({
     queryKey: ['messages'], queryFn: () => api.messages(),
@@ -47,20 +48,21 @@ export function AgentClient() {
   const items = [...(messages?.items ?? [])].reverse()
 
   return (
-    <div className="app-shell flex min-h-screen flex-col px-4 pt-6">
-      <h1 className="mb-1 text-2xl font-semibold tracking-tight">Log anything</h1>
-      <p className="mb-4 text-sm" style={{ color: 'var(--color-tx2)' }}>
-        Type it, photograph it, or say it.
+    <div className="app-shell flex min-h-screen flex-col px-4 pt-6 sm:px-6">
+      <p className="mb-1 text-base font-semibold" style={{ color: 'var(--color-accent-strong)' }}>Nourish</p>
+      <h1 className="display-title mb-1 text-[38px] leading-none">Log anything</h1>
+      <p className="mb-5 mt-2 text-sm" style={{ color: 'var(--color-tx2)' }}>
+        Describe a meal, upload a photo, or ask about today’s nutrition.
       </p>
 
       <div className="flex-1 space-y-3 pb-4">
         {!items.length && (
-          <div className="card p-4 text-sm" style={{ color: 'var(--color-tx2)' }}>
-            <p className="mb-2">Try:</p>
-            <ul className="space-y-1">
-              <li>&ldquo;2 rotis and a katori of dal for lunch&rdquo;</li>
-              <li>A photo of your plate</li>
-              <li>&ldquo;how much protein have I had today?&rdquo;</li>
+          <div className="card p-5 text-sm" style={{ color: 'var(--color-tx2)' }}>
+            <p className="eyebrow mb-3">Try saying</p>
+            <ul className="space-y-3">
+              <li className="rounded-xl p-3" style={{ background: 'var(--color-surface-soft)' }}>&ldquo;2 rotis and a katori of dal for lunch&rdquo;</li>
+              <li className="rounded-xl p-3" style={{ background: 'var(--color-surface-soft)' }}>Upload a photo of your plate</li>
+              <li className="rounded-xl p-3" style={{ background: 'var(--color-surface-soft)' }}>&ldquo;How much protein have I had today?&rdquo;</li>
             </ul>
           </div>
         )}
@@ -81,8 +83,8 @@ export function AgentClient() {
       </div>
 
       <div
-        className="sticky bottom-[84px] flex items-end gap-2 rounded-xl border p-2"
-        style={{ background: 'var(--color-surface)', borderColor: 'var(--color-line)' }}
+        className="sticky bottom-[96px] rounded-[22px] border p-3 shadow-xl"
+        style={{ background: 'var(--color-surface)', borderColor: 'var(--color-line)', boxShadow: '0 12px 32px color-mix(in oklch, var(--color-tx) 10%, transparent)' }}
       >
         <input
           ref={fileRef}
@@ -99,39 +101,36 @@ export function AgentClient() {
             const file = e.target.files?.[0]
             if (file) send.mutate({ body: text, file })
           }} />
-        <button
-          onClick={() => fileRef.current?.click()}
-          disabled={send.isPending}
-          aria-label="Attach a photo, voice note, or PDF"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-lg disabled:opacity-40"
-          style={{ background: 'var(--color-line)' }}
-        >
-          ＋
-        </button>
-        <button onClick={() => cameraRef.current?.click()} disabled={send.isPending}
-          aria-label="Take a meal photo" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-sm disabled:opacity-40"
-          style={{ background: 'var(--color-line)' }}>Photo</button>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              if (text.trim()) send.mutate({ body: text })
-            }
-          }}
-          rows={1}
-          placeholder="What did you eat?"
-          className="flex-1 resize-none bg-transparent py-2 text-sm outline-none"
-        />
-        <button
-          onClick={() => text.trim() && send.mutate({ body: text })}
-          disabled={!text.trim() || send.isPending}
-          className="rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-40"
-          style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
-        >
-          Send
-        </button>
+        <div className="flex items-end gap-2">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                if (text.trim()) send.mutate({ body: text })
+              }
+            }}
+            rows={2}
+            placeholder="Describe what you ate…"
+            className="input min-h-[56px] flex-1 resize-none"
+          />
+          <button
+            onClick={() => text.trim() && send.mutate({ body: text })}
+            disabled={!text.trim() || send.isPending}
+            className="btn-primary shrink-0 px-5 disabled:opacity-40"
+          >
+            Send
+          </button>
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button onClick={() => fileRef.current?.click()} disabled={send.isPending} className="action-button-secondary disabled:opacity-40">
+            + Attach file
+          </button>
+          <button onClick={() => cameraRef.current?.click()} disabled={send.isPending} className="action-button-secondary disabled:opacity-40">
+            Take a photo
+          </button>
+        </div>
       </div>
 
       <BottomNav />
@@ -148,7 +147,7 @@ function Bubble({ message, slot, date }: { message: Message; slot: string | null
   return (
     <div className={mine ? 'flex justify-end' : 'flex justify-start'}>
       <div
-        className="max-w-[85%] rounded-xl px-3 py-2 text-sm"
+        className="max-w-[88%] rounded-2xl px-4 py-3 text-sm"
         style={{
           background: mine ? 'var(--color-accent)' : 'var(--color-surface)',
           color: mine ? 'var(--color-bg)' : 'var(--color-tx)',
@@ -182,12 +181,13 @@ function ConfirmCard({ messageId, items, slot, date }: {
 }) {
   const qc = useQueryClient()
   const [edited, setEdited] = useState(items)
+  const [mealSlot, setMealSlot] = useState(slot ?? suggestedSlot())
 
   const confirm = useMutation({
     mutationFn: () =>
       api.confirmMessage(messageId, {
         meal_date: date,
-        meal_type: slot ?? 'misc',
+        meal_type: mealSlot,
         items: edited.map((i) => ({
           dish_name: i.name, grams: i.estimated_mass_g, portion_unit: 'g',
         })),
@@ -200,8 +200,13 @@ function ConfirmCard({ messageId, items, slot, date }: {
 
   return (
     <div className="mt-2 space-y-2 rounded-lg p-2" style={{ background: 'var(--color-bg)' }}>
+      <label className="block text-sm font-semibold">Add to
+        <select className="input mt-1" value={mealSlot} onChange={(event) => setMealSlot(event.target.value)}>
+          <option value="breakfast">Breakfast</option><option value="brunch">Brunch</option><option value="lunch">Lunch</option><option value="snacks">Snacks</option><option value="dinner">Dinner</option><option value="misc">Other</option>
+        </select>
+      </label>
       {edited.map((item, i) => (
-        <div key={i} className="text-xs">
+        <div key={i} className="text-sm">
           <div className="flex items-center justify-between gap-2">
             <span style={{ color: 'var(--color-tx)' }}>{item.name}</span>
             <input
@@ -226,8 +231,7 @@ function ConfirmCard({ messageId, items, slot, date }: {
       <button
         onClick={() => confirm.mutate()}
         disabled={confirm.isPending}
-        className="w-full rounded-lg py-1.5 text-xs font-medium"
-        style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
+        className="btn-primary mt-2 w-full"
       >
         {confirm.isPending ? 'Logging…' : 'Log it'}
       </button>
@@ -243,4 +247,12 @@ function stripTags(text: string): string {
     .replace(/\[auto-video-caption\]:\s*/g, '')
     .replace(/User sent an image, description above/g, '')
     .trim()
+}
+
+function suggestedSlot() {
+  const hour = new Date().getHours()
+  if (hour < 11) return 'breakfast'
+  if (hour < 15) return 'lunch'
+  if (hour < 18) return 'snacks'
+  return 'dinner'
 }

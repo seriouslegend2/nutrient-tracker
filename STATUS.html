@@ -30,7 +30,7 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
 <header>
   <h1>Current Build Status</h1>
   <p>Evidence-based state after remediation. Historical build counts and unexecuted "verified" claims have been removed.</p>
-  <div class="meta"><span class="pill">checked 2026-08-16</span><span class="pill">12 migrations</span><span class="pill">68 backend tests</span><span class="pill">27 customer auth tests</span><span class="pill">22 dashboard tests</span></div>
+  <div class="meta"><span class="pill">checked 2026-08-16</span><span class="pill">15 migrations</span><span class="pill">98 backend tests</span><span class="pill">31 customer tests</span><span class="pill">22 dashboard tests</span></div>
 </header>
 
 <section>
@@ -39,8 +39,8 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
 <thead><tr><th>Area</th><th>Status</th><th>Evidence in repository</th></tr></thead>
 <tbody>
 <tr><td>Backend API</td><td class="ok">Implemented</td><td>Profile/onboarding, meals/day history, dishes/categories, goals, reports, water, messages, and admin routers under <code>backend/app/api/v1</code>.</td></tr>
-<tr><td>Database</td><td class="ok">Implemented locally</td><td>12 ordered migrations; 15 expected public tables; formulas, triggers, atomic versioning functions, grants, and RLS.</td></tr>
-<tr><td>Customer UI</td><td class="ok">Implemented</td><td>Email/password signup and login, optional email-confirmation callback, first-run onboarding, goal flow, home, manual meals, agent, analytics, hydration, and logout.</td></tr>
+<tr><td>Database</td><td class="ok">Implemented and hosted</td><td>15 ordered migrations; 16 expected public tables; formulas, triggers, atomic versioning functions, grants, and RLS.</td></tr>
+<tr><td>Customer UI</td><td class="ok">Implemented</td><td>One-click Google OAuth signup/login with account chooser, first-run onboarding, concurrent goal flow, Today progress/calendar, manual meals, agent, analytics, hydration, and logout.</td></tr>
 <tr><td>Dashboard</td><td class="ok">Implemented, bounded scope</td><td>Email/password sign-in for existing accounts only, logout, backend admin-role gate, paginated users, six supported user views, aggregate agent metrics, and portion resolution mix. It has no signup or callback; search/filter/sort and Food DB tools are absent by design.</td></tr>
 <tr><td><code>nutrition_chat</code></td><td class="ok">Implemented, provider-dependent</td><td>LangChain agent, read/mutation tools, confirmation gating, persistence, and unit flow tests.</td></tr>
 <tr><td><code>media_extraction</code></td><td class="ok">Implemented, provider-dependent</td><td>LangGraph orchestration for images, explicit label hints, audio, and PDF drafts; byte limits and agent-run persistence.</td></tr>
@@ -55,13 +55,13 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
 <p><strong>Commands were run locally on 2026-08-16.</strong> Results below are command evidence, not inferred from generated artifacts.</p>
 <ul>
   <li><code>uv run ruff check app tests</code>: passed.</li>
-  <li><code>uv run ruff format --check app tests</code>: passed; 75 files already formatted.</li>
+  <li><code>uv run ruff format --check app tests</code>: passed; 81 files already formatted.</li>
   <li>Configured mypy command from CI: passed with no issues in 12 source files.</li>
-  <li><code>uv run lint-imports</code>: 4 contracts kept, 0 broken; 64 files and 126 dependencies analyzed.</li>
-  <li><code>NT_REQUIRE_DATABASE=1 NT_FAIL_ON_SKIP=1 uv run pytest -q</code> against <code>pgvector/pgvector:pg17</code>: <code>69 passed in 10.21s</code>, no skips.</li>
-  <li>Customer auth Vitest suite: <code>27 passed</code>; dashboard Vitest suite: <code>22 passed</code>.</li>
-  <li>Root Playwright infrastructure: strict TypeScript passed, 3 report tests passed, and 14 hosted Chromium scenarios were discovered.</li>
-  <li>Real hosted Playwright run through Supabase Auth/PostgREST and all three local services: <code>14 passed in 1.8m</code>, with 16 named screenshots and an 8-page <code>artifacts/e2e-report.pdf</code>.</li>
+  <li><code>uv run lint-imports</code>: 4 contracts kept, 0 broken; 65 files and 127 dependencies analyzed.</li>
+  <li><code>NT_REQUIRE_DATABASE=1 NT_FAIL_ON_SKIP=1 uv run pytest -q</code> against <code>pgvector/pgvector:pg17</code>: <code>98 passed in 12.96s</code>, no skips.</li>
+  <li>Customer Vitest suite: <code>31 passed</code>; dashboard Vitest suite: <code>22 passed</code>.</li>
+  <li>Root Playwright infrastructure: strict TypeScript passed, 3 report tests passed, and 15 hosted Chromium scenarios were discovered.</li>
+  <li>Current hosted Playwright run after the goal/portion migrations: <code>15 passed in 2.3m</code>, with 17 named screenshots and a 9-page <code>artifacts/e2e-report.pdf</code>. All generated auth users were removed.</li>
   <li><code>npm audit --omit=dev</code> in each frontend: 0 production vulnerabilities.</li>
   <li>Customer app <code>npm run typecheck</code> and <code>npm run build</code>: passed.</li>
   <li>Internal dashboard <code>npm run typecheck</code> and <code>npm run build</code>: passed.</li>
@@ -75,9 +75,9 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
 <section>
 <h2>What The Database Run Proves</h2>
 <ul>
-  <li>All 12 migrations apply in order to an empty Postgres 17 database shaped with the Supabase roles, <code>auth.users</code>, and <code>auth.uid()</code> stub required by the suite.</li>
+  <li>All 15 migrations apply in order to an empty Postgres 17 database shaped with the Supabase roles, <code>auth.users</code>, and <code>auth.uid()</code> stub required by the suite.</li>
   <li>Nutrition formulas, calorie floors, safe-rate clamps, target-BMI and medical guards, and behaviour goals pass worked assertions.</li>
-  <li>Portion resolution order, unknown fallback, body/profile refresh, coherent meal-day versions, atomic preference/portion swaps, active-goal uniqueness, and schema presence are tested.</li>
+  <li>Portion resolution order, unknown fallback, body/profile refresh, coherent meal-day versions, atomic preference/portion swaps, concurrent goals with one primary, cadence progress, activity logs, and schema presence are tested.</li>
   <li>RLS enablement is checked on user-owned tables.</li>
   <li>Privileged security-definer functions are checked as unavailable to public, anonymous, and authenticated roles and available to the service role.</li>
   <li>The 18 global category defaults exist and seeded nutrient vectors do not store calorie values.</li>
@@ -110,14 +110,14 @@ th { color:var(--tx); font-size:.8rem; text-transform:uppercase; letter-spacing:
   <li>The customer manifest has no service worker/offline implementation. Export, self-service deletion, and a general post-onboarding profile editor are absent.</li>
   <li>The dashboard intentionally omits user search/filter/sort, Food DB administration, body history, goal progress, and audit panels.</li>
   <li>Frontend API interfaces are handwritten. There is no generated shared type/client artifact.</li>
-  <li>Focused Vitest suites cover email/password routes, safe redirects, backend JWT generation, API clients, pagination, and dashboard panel contracts: 27 customer auth tests and 22 dashboard tests. The real hosted Playwright suite passed all 14 non-agent scenarios with PDF evidence.</li>
+  <li>Focused Vitest suites cover Google OAuth routing, safe redirects, backend JWT generation, API clients, pagination, and dashboard panel contracts. The existing hosted Playwright evidence predates the Google-only customer login change.</li>
 </ul>
 </section>
 
 <section>
 <h2>Unverified External Runtime</h2>
 <div class="card bad">
-<p><strong>Live hosted email/password signin is verified; self-service signup and confirmation are not.</strong> E2E provisioned confirmed users through Supabase Auth Admin, so the customer confirmation callback at <code>http://localhost:3000/auth/callback</code> remains unverified. The sign-in-only dashboard does not need a callback.</p>
+<p><strong>Live Google OAuth remains to be verified after provider configuration.</strong> The existing hosted E2E provisioned password users and therefore does not prove the new customer Google account chooser or OAuth callback.</p>
 </div>
 <ul>
   <li>The exposed service-role key and database password must be rotated, and the shared JWT placeholder must be replaced before production use.</li>

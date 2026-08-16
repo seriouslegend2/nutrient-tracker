@@ -1,7 +1,7 @@
 import { createServerClient, type SetAllCookies } from '@supabase/ssr'
 import { NextRequest, NextResponse } from 'next/server'
 
-import { authCookieOptions } from '@/lib/auth'
+import { authCookieOptions, safeRedirectPath } from '@/lib/auth'
 
 /**
  * Auth gate + security headers.
@@ -39,18 +39,37 @@ export async function proxy(request: NextRequest) {
     path.startsWith('/_next') || path === '/favicon.ico' || path === '/manifest.webmanifest'
   const isApi = path.startsWith('/api')
 
+  if (user && path === '/auth/login') {
+    return redirectWithCookies(
+      response,
+      new URL(safeRedirectPath(request.nextUrl.searchParams.get('next')), request.url)
+    )
+  }
+
   // Redirect page requests. API routes return their own JSON 401s.
   if (!user && !isPublic && !isApi) {
     const redirect = request.nextUrl.clone()
     redirect.pathname = '/auth/login'
+    redirect.search = ''
     redirect.searchParams.set('next', `${path}${request.nextUrl.search}`)
-    return NextResponse.redirect(redirect)
+    return redirectWithCookies(response, redirect)
   }
 
+  setSecurityHeaders(response)
+  return response
+}
+
+function redirectWithCookies(response: NextResponse, destination: URL) {
+  const redirect = NextResponse.redirect(destination)
+  response.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie))
+  setSecurityHeaders(redirect)
+  return redirect
+}
+
+function setSecurityHeaders(response: NextResponse) {
   response.headers.set('X-Frame-Options', 'DENY')
   response.headers.set('X-Content-Type-Options', 'nosniff')
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
-  return response
 }
 
 export const config = {

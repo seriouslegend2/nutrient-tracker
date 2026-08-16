@@ -10,26 +10,28 @@ export function LoginClient() {
   const callbackFailed = params.has('error')
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-[420px] flex-col justify-center px-6">
-      <h1 className="text-3xl font-semibold tracking-tight">Nutrient Tracker</h1>
+    <main className="auth-shell">
+      <section className="auth-card">
+       <div className="brand-mark mb-6" aria-hidden="true">
+         <MacroMark />
+       </div>
+       <p className="mb-2 font-semibold" style={{ color: 'var(--color-accent-strong)' }}>Your daily nutrition</p>
+      <h1 className="display-title text-[42px] leading-none">Nourish</h1>
       <p className="mb-6 mt-2 text-sm" style={{ color: 'var(--color-tx2)' }}>
-        Log meals, set goals, see where you actually are.
+         Log meals, correct portions, and see what is left today.
       </p>
 
       <a
         href={`/api/auth/google?next=${encodeURIComponent(next)}`}
         className="btn-primary flex w-full items-center justify-center gap-3"
       >
-        <span
-          className="grid h-7 w-7 place-items-center rounded-full bg-white text-base font-bold text-neutral-700"
-          aria-hidden="true"
-        >
+        <span className="grid h-7 w-7 place-items-center rounded-full bg-white text-base font-bold text-neutral-700" aria-hidden="true">
           G
         </span>
         Continue with Google
       </a>
-      <p className="mt-4 text-center text-xs leading-5" style={{ color: 'var(--color-tx2)' }}>
-        Choose a Google account. New users are registered automatically and existing users are signed in.
+      <p className="mt-4 text-center text-sm leading-6" style={{ color: 'var(--color-tx2)' }}>
+        New here? Your account will be created when you continue.
       </p>
 
       {callbackFailed && (
@@ -37,6 +39,17 @@ export function LoginClient() {
           Google sign-in could not be completed. Please try again.
         </p>
       )}
+      </section>
     </main>
+  )
+}
+
+function MacroMark() {
+  return (
+    <span className="flex h-6 items-end gap-1">
+      <span className="h-4 w-1.5 rounded-full bg-white" />
+      <span className="h-6 w-1.5 rounded-full bg-white" />
+      <span className="h-3 w-1.5 rounded-full bg-white" />
+    </span>
   )
 }

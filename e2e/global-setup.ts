@@ -31,6 +31,7 @@ const TABLE_MIGRATIONS: Record<string, string> = {
   goals: '20260815100400_goals_and_logs.sql',
   user_preferences: '20260815100400_goals_and_logs.sql',
   water_logs: '20260815100400_goals_and_logs.sql',
+  activity_logs: '20260816130000_multi_goal_cadence.sql',
   communication_master: '20260815100400_goals_and_logs.sql',
   agent_runs: '20260815100400_goals_and_logs.sql',
   audit_log: '20260815100400_goals_and_logs.sql',
@@ -44,6 +45,10 @@ const REQUIRED_RPCS: Record<string, string> = {
   fn_goal_progress: '20260815100700_lookup_chain_and_triggers.sql',
   fn_create_goal: '20260816110000_backend_database_remediation.sql',
   fn_set_goal_active: '20260816110000_backend_database_remediation.sql',
+  fn_resolve_goal_targets_v2: '20260816130000_multi_goal_cadence.sql',
+  fn_create_goal_v2: '20260816130000_multi_goal_cadence.sql',
+  fn_set_goal_active_v2: '20260816130000_multi_goal_cadence.sql',
+  fn_set_goal_primary: '20260816130000_multi_goal_cadence.sql',
   fn_replace_meal_day: '20260816110000_backend_database_remediation.sql',
   fn_version_meal_item: '20260816110000_backend_database_remediation.sql',
   fn_upsert_preference: '20260816110000_backend_database_remediation.sql',
@@ -81,6 +86,7 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
     await ensureBootstrap(supabaseUrl, headers, primary, true)
     await ensureBootstrap(supabaseUrl, headers, nonAdmin, false)
     await resetOnboarding(supabaseUrl, headers, primary.id)
+    await resetE2EGoals(supabaseUrl, headers, primary.id)
     await removeStaleE2EMeals(supabaseUrl, headers, primary.id)
 
     await writeMetadata({
@@ -189,6 +195,15 @@ async function ensureBootstrap(
 
 async function resetOnboarding(base: string, headers: Record<string, string>, userId: string): Promise<void> {
   await restWrite(base, headers, `user_profiles?user_id=eq.${userId}`, 'PATCH', { onboarding_completed_at: null })
+}
+
+async function resetE2EGoals(base: string, headers: Record<string, string>, userId: string): Promise<void> {
+  await restWrite(base, headers, `goals?user_id=eq.${userId}&is_active=eq.true`, 'PATCH', {
+    is_active: false,
+    is_primary: false,
+    status: 'abandoned',
+  })
+  await restWrite(base, headers, `activity_logs?user_id=eq.${userId}`, 'DELETE')
 }
 
 async function removeStaleE2EMeals(base: string, headers: Record<string, string>, userId: string): Promise<void> {

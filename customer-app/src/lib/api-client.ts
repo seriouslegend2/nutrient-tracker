@@ -124,14 +124,23 @@ export const api = {
 
   activeGoal: () => request<Goal | null>('/goals/active'),
   goals: (page = 1) => request<Page<Goal>>(`/goals${qs({ page })}`),
-  previewGoal: (body: Record<string, unknown>) =>
+  previewGoal: (body: GoalRequest) =>
     request<GoalPreview>('/goals/preview', { method: 'POST', body: JSON.stringify(body) }),
-  createGoal: (body: Record<string, unknown>) =>
+  createGoal: (body: GoalRequest) =>
     request<Goal>('/goals', { method: 'POST', body: JSON.stringify(body) }),
   activateGoal: (id: string) => request<Goal>(`/goals/${id}/activate`, { method: 'POST' }),
   deactivateGoal: (id: string) => request<Goal>(`/goals/${id}/deactivate`, { method: 'POST' }),
+  makeGoalPrimary: (id: string) => request<Goal>(`/goals/${id}/primary`, { method: 'POST' }),
   goalProgress: (id: string, params: Record<string, unknown> = {}) =>
     request<GoalProgress>(`/goals/${id}/progress${qs(params)}`),
+  goalProgressSummary: (asOf: string) =>
+    request<GoalProgressSummary>(`/goals/progress/summary${qs({ as_of: asOf })}`),
+  checkInGoalActivity: (date: string) =>
+    request<GoalActivity>('/goals/activity/check-in', {
+      method: 'POST', body: JSON.stringify({ date, activity_type: 'training' }),
+    }),
+  goalActivity: (params: Record<string, unknown> = {}) =>
+    request<Page<GoalActivity>>(`/goals/activity${qs(params)}`),
 
   trend: (params: Record<string, unknown> = {}) => request<Trend>(`/reports/trend${qs(params)}`),
   macros: (params: Record<string, unknown> = {}) => request<Macros>(`/reports/macros${qs(params)}`),
@@ -139,8 +148,8 @@ export const api = {
   goalVsActual: (params: Record<string, unknown> = {}) =>
     request<GoalVsActual>(`/reports/goal-vs-actual${qs(params)}`),
 
-  logWater: (volume_ml: number) =>
-    request('/water', { method: 'POST', body: JSON.stringify({ volume_ml }) }),
+  logWater: (volume_ml: number, logged_on?: string) =>
+    request('/water', { method: 'POST', body: JSON.stringify({ volume_ml, logged_on }) }),
   water: (params: Record<string, unknown> = {}) => request<Page<WaterLog>>(`/water${qs(params)}`),
 
   sendMessage: (form: FormData) =>
@@ -244,15 +253,29 @@ export type DishPortion = {
 export type GoalTarget = {
   metric: string
   scope: string
-  direction: string
+  direction: GoalDirection
   value: number
   unit: string
   label?: string
 }
 
+export type GoalCadence = 'daily' | 'weekly' | 'monthly' | 'period'
+export type GoalKind = 'nutrient' | 'body_weight' | 'item' | 'hydration' | 'behaviour'
+export type GoalDirection = 'at_least' | 'at_most' | 'around'
+export type GoalProgressStatus = 'met' | 'below' | 'above' | 'no_data' | 'in_progress' | 'future'
+
+export type GoalRequest = {
+  kind: GoalKind
+  spec: Record<string, unknown>
+  starts_on: string
+  ends_on: string
+  cadence: GoalCadence
+  make_primary?: boolean
+}
+
 export type Goal = {
   goal_id: string
-  kind: string
+  kind: GoalKind
   spec: Record<string, unknown>
   starts_on: string
   ends_on: string
@@ -261,12 +284,58 @@ export type Goal = {
   status: string
   version: number
   is_active: boolean
+  cadence: GoalCadence
+  is_primary: boolean
 }
 
 export type GoalPreview = {
   daily_targets: { targets: GoalTarget[] }
   derivation: Record<string, unknown>
   clamp_fired: boolean
+  cadence: GoalCadence
+}
+
+export type GoalProgressValue = {
+  status: GoalProgressStatus
+  actual: number | null
+  target: number
+  unit: string
+  direction: GoalDirection | null
+}
+
+export type GoalProgressSummaryItem = {
+  goal_id: string
+  kind: GoalKind
+  metric: string | null
+  cadence: GoalCadence
+  is_primary: boolean
+  label: string
+  starts_on: string
+  ends_on: string
+  today: GoalProgressValue
+  period: {
+    status: GoalProgressStatus
+    actual: number | null
+    target: number
+    unit: string
+    progress_pct: number | null
+    completed_buckets: number | null
+    total_buckets: number | null
+  }
+  streak: { current: number; longest: number; unit: string }
+  calendar: { date: string; status: GoalProgressStatus; actual: number | null; target: number }[]
+}
+
+export type GoalProgressSummary = {
+  as_of: string
+  goals: GoalProgressSummaryItem[]
+}
+
+export type GoalActivity = {
+  id: string
+  activity_date: string
+  activity_type: 'training'
+  created_at: string
 }
 
 export type GoalProgress = {
@@ -329,6 +398,7 @@ export type MicroRow = {
 
 export type GoalVsActual = {
   has_goal: boolean
+  goal_kind?: string
   clamp_fired?: boolean
   targets: GoalTarget[]
   series: Record<string, unknown>[]

@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test'
 
 import { evidence } from '../support/evidence'
 import { CUSTOMER_URL, required } from '../support/environment'
+import { installCustomerSession } from '../support/customer-auth'
 
 test.describe.serial('customer non-agent journey', () => {
   let context: BrowserContext
@@ -21,14 +22,15 @@ test.describe.serial('customer non-agent journey', () => {
 
   test.afterAll(async () => context?.close())
 
-  test('email login rejects an unsafe continuation and requires onboarding', async ({}, testInfo) => {
+  test('Google login rejects an unsafe continuation and requires onboarding', async ({}, testInfo) => {
     await page.goto(`${CUSTOMER_URL}/home`)
     await expect(page).toHaveURL(/\/auth\/login\?next=%2Fhome/)
 
     await page.goto(`${CUSTOMER_URL}/auth/login?next=${encodeURIComponent('https://example.invalid/escape')}`)
-    await page.getByLabel('Email').fill(required('E2E_EMAIL'))
-    await page.getByLabel('Password').fill(required('E2E_PASSWORD'))
-    await page.locator('form').getByRole('button', { name: 'Log in', exact: true }).click()
+    await expect(page.getByRole('link', { name: 'Continue with Google' }))
+      .toHaveAttribute('href', '/api/auth/google?next=%2Fhome')
+    await installCustomerSession(context, required('E2E_EMAIL'), required('E2E_PASSWORD'))
+    await page.goto(`${CUSTOMER_URL}/home`)
 
     await expect(page).toHaveURL(`${CUSTOMER_URL}/onboarding`)
     await expect(page.getByRole('heading', { name: 'About you' })).toBeVisible()
@@ -72,47 +74,88 @@ test.describe.serial('customer non-agent journey', () => {
   })
 
   test('goal preview and creation reach the home dashboard', async ({}, testInfo) => {
+    await page.getByRole('radio', { name: /Weight/ }).click()
     await page.getByLabel('Direction').selectOption('lose')
     await page.getByLabel('Amount (kg)').fill('3')
     await page.getByRole('button', { name: 'Preview goal' }).click()
-    await expect(page.getByRole('heading', { name: 'Daily preview' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Create goal' })).toBeEnabled()
+    await expect(page.getByRole('heading', { name: 'Goal preview' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Add a goal' })).toBeEnabled()
     await evidence(page, testInfo, 'customer-03-goal-preview')
 
-    await page.getByRole('button', { name: 'Create goal' }).click()
+    await page.getByRole('button', { name: 'Add a goal' }).click()
     await expect(page).toHaveURL(`${CUSTOMER_URL}/home`)
-    await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Macros' })).toBeVisible()
-    await expect(page.getByText('Your goal')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Goals' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Body weight' })).toBeVisible()
     await evidence(page, testInfo, 'customer-04-home-with-goal')
   })
 
-  test('manual free-text meal supports create, edit, and delete', async ({}, testInfo) => {
-    const dish = `E2E free text ${Date.now()}`
+  test('multiple safe goals and explicit training check-ins stay independent', async ({}, testInfo) => {
+    await page.goto(`${CUSTOMER_URL}/goals/new`)
+    await page.getByRole('radio', { name: /Protein/ }).click()
+    await page.getByLabel('Protein (grams per day)').fill('20')
+    await page.getByRole('button', { name: 'Preview goal' }).click()
+    await expect(page.getByText(/applied target is/i)).toBeVisible()
+    await page.getByRole('button', { name: 'Add a goal' }).click()
+    await expect(page.getByRole('tab', { name: 'Daily protein' })).toBeVisible()
+
+    await page.goto(`${CUSTOMER_URL}/goals/new`)
+    await page.getByRole('radio', { name: /Hydration/ }).click()
+    await page.getByLabel('Water (ml per day)').fill('10000')
+    await expect(page.getByRole('button', { name: 'Preview goal' })).toBeDisabled()
+    await page.getByLabel('Water (ml per day)').fill('2000')
+    await page.getByRole('button', { name: 'Preview goal' }).click()
+    await page.getByRole('button', { name: 'Add a goal' }).click()
+    await expect(page.getByRole('tab', { name: 'Daily hydration' })).toBeVisible()
+
+    await page.goto(`${CUSTOMER_URL}/goals/new`)
+    await page.getByRole('radio', { name: /Training/ }).click()
+    await page.getByLabel('Evaluation period').selectOption('weekly')
+    await page.getByLabel('Training days per week').fill('3')
+    await page.getByRole('button', { name: 'Preview goal' }).click()
+    await page.getByRole('button', { name: 'Add a goal' }).click()
+
+    const trainingTab = page.getByRole('tab', { name: 'Training days' })
+    await expect(trainingTab).toBeVisible()
+    await trainingTab.click()
+    await page.getByRole('button', { name: 'I trained today' }).click()
+    await expect(page.getByRole('button', { name: 'Training checked in today' })).toBeDisabled()
+    await expect(page.getByText(/current streak/)).toBeVisible()
+    await evidence(page, testInfo, 'customer-05-multiple-goals-training-check-in')
+  })
+
+  test('paneer servings support create, portion edit, and delete', async ({}, testInfo) => {
+    const response = await context.request.get(`${CUSTOMER_URL}/api/dishes/search?q=paneer%20butter&page=1`)
+    expect(response.ok(), await response.text()).toBeTruthy()
+    const search = await response.json() as { items?: { name: string }[] }
+    const dish = search.items?.find((item) => item.name === 'Paneer butter masala')?.name
+    test.skip(!dish, 'Optional curated Paneer butter masala seed is not installed.')
+    const selectedDish = dish!
+
     await page.goto(`${CUSTOMER_URL}/meals`)
     await expect(page.getByRole('heading', { name: 'Meals' })).toBeVisible()
     await page.getByRole('button', { name: '+ Add lunch' }).click()
     const form = page.getByRole('region', { name: 'Add manually' })
-    await form.getByLabel('Dish').fill(dish)
-    await form.getByLabel('Portions').fill('1.5')
-    await form.getByLabel('Exact grams (optional)').fill('150')
+    await form.getByLabel('Dish').fill('paneer butter')
+    await form.getByRole('button', { name: selectedDish, exact: false }).first().click()
+    await expect(form.getByText(/100 g per serving/)).toBeVisible()
+    await form.getByLabel('Servings').fill('1.5')
     const createResponse = waitForMealMutation(page, 'POST')
     await form.getByRole('button', { name: 'Add meal', exact: true }).click()
 
     const createdId = await successfulMealId(await createResponse)
     let row = page.locator(`[data-meal-id="${createdId}"]`)
     await expect(row).toBeVisible()
-    await evidence(page, testInfo, 'customer-05-free-text-meal-created')
-    let rowButton = row.getByRole('button', { name: new RegExp(dish) })
+    await evidence(page, testInfo, 'customer-05-paneer-serving-created')
+    let rowButton = row.getByRole('button', { name: new RegExp(selectedDish) })
     await rowButton.click()
     await row.getByRole('button', { name: 'Edit portion' }).click()
-    await row.getByLabel('Portions').fill('2')
-    await row.getByLabel('Exact grams').fill('200')
+    await row.getByLabel('Servings').fill('2')
     const updateResponse = waitForMealMutation(page, 'PATCH')
     await row.getByRole('button', { name: 'Save', exact: true }).click()
     const updatedId = await successfulMealId(await updateResponse)
     row = page.locator(`[data-meal-id="${updatedId}"]`)
-    rowButton = row.getByRole('button', { name: new RegExp(dish) })
+    rowButton = row.getByRole('button', { name: new RegExp(selectedDish) })
     await expect(rowButton).toContainText('200 g')
 
     await rowButton.click()
@@ -121,7 +164,7 @@ test.describe.serial('customer non-agent journey', () => {
     await expect(rowButton).toHaveCount(0)
   })
 
-  test('seeded dish search and saved dish portion work when seed data exists', async ({}, testInfo) => {
+  test('seeded dish search and category portion work when seed data exists', async ({}, testInfo) => {
     const response = await context.request.get(`${CUSTOMER_URL}/api/dishes/search?q=dal&page=1`)
     expect(response.ok(), await response.text()).toBeTruthy()
     const search = await response.json() as { items?: { name: string }[] }
@@ -134,7 +177,7 @@ test.describe.serial('customer non-agent journey', () => {
     await form.getByLabel('Dish').fill('dal')
     await form.getByRole('button', { name: selected, exact: false }).first().click()
     await expect(form.getByText(/Your resolved portion:/)).toBeVisible()
-    await form.getByLabel('Exact grams (optional)').fill('180')
+    await form.getByLabel('Servings').fill('1')
     const createResponse = waitForMealMutation(page, 'POST')
     await form.getByRole('button', { name: 'Add meal', exact: true }).click()
 
@@ -144,14 +187,13 @@ test.describe.serial('customer non-agent journey', () => {
     let rowButton = row.getByRole('button', { name: new RegExp(escapeRegex(selected)) })
     await rowButton.click()
     await row.getByRole('button', { name: 'Edit portion' }).click()
-    await row.getByLabel('Exact grams').fill('200')
-    await row.getByLabel(/Save these grams/).check()
+    await row.getByLabel('Servings').fill('2')
     const updateResponse = waitForMealMutation(page, 'PATCH')
     await row.getByRole('button', { name: 'Save', exact: true }).click()
     const updatedId = await successfulMealId(await updateResponse)
     row = page.locator(`[data-meal-id="${updatedId}"]`)
     rowButton = row.getByRole('button', { name: new RegExp(escapeRegex(selected)) })
-    await expect(rowButton).toContainText('200 g')
+    await expect(rowButton).toContainText('400 g')
     await evidence(page, testInfo, 'customer-06-seeded-dish-and-portion')
 
     await rowButton.click()
@@ -160,13 +202,12 @@ test.describe.serial('customer non-agent journey', () => {
     await expect(rowButton).toHaveCount(0)
   })
 
-  test('water logging exposes recent history', async ({}, testInfo) => {
+  test('water logging updates Today', async ({}, testInfo) => {
     await page.goto(`${CUSTOMER_URL}/home`)
     const water = page.getByRole('region', { name: 'Water' })
     await water.getByRole('button', { name: '+250 ml' }).click()
-    await expect(water.getByText('Recent history')).toBeVisible()
-    await water.getByText('Recent history').click()
-    await expect(water.getByText(new Date().toISOString().slice(0, 10))).toBeVisible()
+    await expect(water.getByRole('status')).toHaveText('250 ml added.')
+    await expect(water.getByRole('heading', { name: '0.3 L' })).toBeVisible()
     await evidence(page, testInfo, 'customer-07-water-history')
   })
 
@@ -202,7 +243,8 @@ test.describe.serial('customer non-agent journey', () => {
     const current = Number(await grams.inputValue())
     await grams.fill(String(current + 1))
     await portionRow.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(portionButton).toContainText('yours')
+    await expect(portionButton).toContainText('Your size')
+    await expect(portionButton).toContainText(`${current + 1} g`)
 
     const deactivate = page.getByRole('button', { name: 'Deactivate' }).first()
     await expect(deactivate).toBeVisible()

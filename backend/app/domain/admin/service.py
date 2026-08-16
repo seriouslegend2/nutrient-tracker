@@ -38,6 +38,7 @@ async def get_user(user_id: str) -> Row:
         .select("*")
         .eq("user_id", user_id)
         .eq("is_active", True)
+        .eq("is_primary", True)
         .limit(1)
         .execute()
     )

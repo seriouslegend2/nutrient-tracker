@@ -32,17 +32,16 @@ import asyncio
 import re
 import sys
 from pathlib import Path
-from typing import Any
 
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
-from supabase import AsyncClient, acreate_client  # noqa: E402
-from supabase.lib.client_options import AsyncClientOptions  # noqa: E402
+from supabase import AsyncClient, acreate_client
+from supabase.lib.client_options import AsyncClientOptions
 
-from app.config.settings import settings  # noqa: E402
-from app.utils.logger import logger  # noqa: E402
+from app.config.settings import settings
+from app.utils.logger import logger
 
 # Yield factors: cooked grams per raw gram. Used to convert IFCT raw values.
 YIELD = {
@@ -68,7 +67,9 @@ def cooked(per_100g_raw: dict[str, float], food_key: str) -> dict[str, float]:
 # `calories_kcal` is omitted deliberately: energy is always recomputed from
 # macros (EuroFIR Step 10), never stored.
 # ---------------------------------------------------------------------------
-DISHES: list[dict[str, Any]] = [
+DishSeed = tuple[str, str, str, float, dict[str, float]]
+
+DISHES: list[DishSeed] = [
     # --- dal / gravy -------------------------------------------------------
     ("Toor dal", "dal_gravy", "katori", 200, {"protein_g": 6.5, "carbs_g": 12.0, "fat_g": 2.5, "fiber_g": 2.2, "iron_mg": 1.3}),
     ("Dal tadka", "dal_gravy", "katori", 200, {"protein_g": 6.0, "carbs_g": 12.5, "fat_g": 5.0, "fiber_g": 2.0, "iron_mg": 1.2}),
@@ -113,16 +114,16 @@ DISHES: list[dict[str, Any]] = [
     ("Poha", "rice_grain", "bowl", 150, {"protein_g": 2.5, "carbs_g": 25.0, "fat_g": 4.0, "fiber_g": 1.2, "iron_mg": 2.7}),
 
     # --- protein mains -----------------------------------------------------
-    ("Chicken curry", "protein_main", "g", 1, {"protein_g": 18.0, "carbs_g": 4.0, "fat_g": 10.0, "iron_mg": 1.2, "vitamin_b12_ug": 0.4}),
-    ("Grilled chicken breast", "protein_main", "g", 1, {"protein_g": 31.0, "carbs_g": 0.0, "fat_g": 3.6, "vitamin_b12_ug": 0.3}),
-    ("Fish curry", "protein_main", "g", 1, {"protein_g": 17.0, "carbs_g": 3.0, "fat_g": 8.0, "vitamin_d_iu": 40, "vitamin_b12_ug": 1.2}),
-    ("Mutton curry", "protein_main", "g", 1, {"protein_g": 16.0, "carbs_g": 3.0, "fat_g": 14.0, "iron_mg": 2.0, "vitamin_b12_ug": 1.8}),
-    ("Egg curry", "protein_main", "g", 1, {"protein_g": 11.0, "carbs_g": 4.0, "fat_g": 11.0, "vitamin_b12_ug": 0.9}),
+    ("Chicken curry", "protein_main", "serving", 150, {"protein_g": 18.0, "carbs_g": 4.0, "fat_g": 10.0, "iron_mg": 1.2, "vitamin_b12_ug": 0.4}),
+    ("Grilled chicken breast", "protein_main", "serving", 150, {"protein_g": 31.0, "carbs_g": 0.0, "fat_g": 3.6, "vitamin_b12_ug": 0.3}),
+    ("Fish curry", "protein_main", "serving", 150, {"protein_g": 17.0, "carbs_g": 3.0, "fat_g": 8.0, "vitamin_d_iu": 40, "vitamin_b12_ug": 1.2}),
+    ("Mutton curry", "protein_main", "serving", 150, {"protein_g": 16.0, "carbs_g": 3.0, "fat_g": 14.0, "iron_mg": 2.0, "vitamin_b12_ug": 1.8}),
+    ("Egg curry", "protein_main", "serving", 150, {"protein_g": 11.0, "carbs_g": 4.0, "fat_g": 11.0, "vitamin_b12_ug": 0.9}),
 
     # --- paneer / eggs -----------------------------------------------------
-    ("Paneer butter masala", "paneer_tofu", "g", 1, {"protein_g": 10.0, "carbs_g": 6.0, "fat_g": 18.0, "calcium_mg": 200}),
-    ("Palak paneer", "paneer_tofu", "g", 1, {"protein_g": 9.0, "carbs_g": 5.0, "fat_g": 13.0, "calcium_mg": 230, "iron_mg": 2.2}),
-    ("Paneer bhurji", "paneer_tofu", "g", 1, {"protein_g": 13.0, "carbs_g": 4.0, "fat_g": 16.0, "calcium_mg": 250}),
+    ("Paneer butter masala", "paneer_tofu", "serving", 100, {"protein_g": 10.0, "carbs_g": 6.0, "fat_g": 18.0, "calcium_mg": 200}),
+    ("Palak paneer", "paneer_tofu", "serving", 100, {"protein_g": 9.0, "carbs_g": 5.0, "fat_g": 13.0, "calcium_mg": 230, "iron_mg": 2.2}),
+    ("Paneer bhurji", "paneer_tofu", "serving", 100, {"protein_g": 13.0, "carbs_g": 4.0, "fat_g": 16.0, "calcium_mg": 250}),
     ("Boiled egg", "egg", "piece", 50, {"protein_g": 12.6, "carbs_g": 1.1, "fat_g": 10.6, "vitamin_b12_ug": 1.1, "vitamin_d_iu": 87}),
     ("Egg bhurji", "egg", "piece", 60, {"protein_g": 11.0, "carbs_g": 2.5, "fat_g": 13.0, "vitamin_b12_ug": 1.0}),
 
@@ -161,7 +162,9 @@ async def upsert_dish(
     per_100g: dict[str, float],
 ) -> None:
     existing = (
-        await sb.table("dish_global").select("id,dish_id,version")
+        await sb.table("dish_global").select(
+            "id,dish_id,version,name,category,portion_unit,portion_grams,per_100g,source"
+        )
         .eq("name_normalized", normalize(name)).eq("is_active", True).limit(1).execute()
     )
     row = {
@@ -176,6 +179,16 @@ async def upsert_dish(
     }
     if existing.data:
         old = existing.data[0]
+        unchanged = (
+            old["name"] == name
+            and old["category"] == category
+            and old["portion_unit"] == unit
+            and float(old["portion_grams"]) == float(grams)
+            and old["per_100g"] == per_100g
+            and old["source"] == "seed"
+        )
+        if unchanged:
+            return
         await sb.table("dish_global").update({"is_active": False}).eq("id", old["id"]).execute()
         row["dish_id"] = old["dish_id"]
         row["version"] = old["version"] + 1

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 
 import { GoalSetup } from '@/components/goal-setup'
 import { api, type Me } from '@/lib/api-client'
+import { localDateISO } from '@/lib/date'
 
 type Answers = {
   sex?: string
@@ -85,9 +86,11 @@ export function OnboardingClient() {
 
   if (profileComplete) {
     return (
-      <div className="app-shell min-h-screen px-5 pt-10">
+      <div className="app-shell min-h-screen px-5 pt-8 sm:px-6">
+        <p className="eyebrow mb-3">Profile complete</p>
         <div className="mb-6 h-1 rounded-full" style={{ background: 'var(--color-accent)' }} />
         <GoalSetup
+          title="Set your first goal"
           isPregnantOrNursing={a.is_pregnant_or_nursing}
           hasMedicalCondition={a.has_medical_condition}
           onCreated={() => router.replace('/home')}
@@ -104,9 +107,13 @@ export function OnboardingClient() {
   }
 
   return (
-    <div className="app-shell min-h-screen px-5 pt-10">
-      <div className="mb-6 flex gap-1">
-        {[0, 1, 2, 3, 4, 5].map((index) => (
+    <div className="app-shell min-h-screen px-5 pt-8 sm:px-6">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="eyebrow">Set up your profile</p>
+        <span className="text-xs tabular-nums" style={{ color: 'var(--color-tx2)' }}>{step + 1} of 5</span>
+      </div>
+      <div className="mb-6 flex gap-1.5">
+        {[0, 1, 2, 3, 4].map((index) => (
           <div key={index} className="h-1 flex-1 rounded-full"
                style={{ background: index <= step ? 'var(--color-accent)' : 'var(--color-line)' }} />
         ))}
@@ -117,7 +124,7 @@ export function OnboardingClient() {
           <Choice label="Sex" options={[['male', 'Male'], ['female', 'Female']]}
                   value={a.sex} onChange={(value) => set('sex', value)} />
           <Field label="Date of birth (required)">
-            <input type="date" required max={new Date().toISOString().slice(0, 10)}
+            <input type="date" required max={localDateISO()}
                    value={a.date_of_birth ?? ''} onChange={(e) => set('date_of_birth', e.target.value)}
                    className="input" />
           </Field>
@@ -217,8 +224,8 @@ function validateStep(step: number, answers: Answers) {
 }
 
 function Screen({ title, why, children }: { title: string; why: string; children: React.ReactNode }) {
-  return <div><h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-    <p className="mb-6 mt-1 text-sm" style={{ color: 'var(--color-tx2)' }}>{why}</p>
+  return <div className="card p-5 sm:p-7"><h1 className="display-title text-3xl">{title}</h1>
+    <p className="mb-6 mt-1.5 text-sm leading-relaxed" style={{ color: 'var(--color-tx2)' }}>{why}</p>
     <div className="space-y-4">{children}</div></div>
 }
 
@@ -242,5 +249,5 @@ function Choice({ label, options, value, onChange }: {
 }
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />{label}</label>
+  return <label className="flex min-h-14 items-center gap-3 rounded-2xl border px-4 text-sm" style={{ borderColor: 'var(--color-line)', background: 'var(--color-surface-soft)' }}><input className="h-5 w-5" type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />{label}</label>
 }

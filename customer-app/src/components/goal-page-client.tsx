@@ -10,8 +10,8 @@ export function GoalPageClient() {
   const router = useRouter()
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: api.me })
   return (
-    <main className="app-shell min-h-screen px-5 pt-8">
-      <button onClick={() => router.back()} className="mb-6 text-sm" style={{ color: 'var(--color-accent)' }}>Back</button>
+    <main className="app-shell min-h-screen px-5 pt-8 sm:px-6">
+      <button onClick={() => router.back()} className="mb-5 text-sm font-semibold" style={{ color: 'var(--color-accent-strong)' }}>← Back</button>
       <GoalSetup isPregnantOrNursing={me?.profile?.is_pregnant_or_nursing}
                  hasMedicalCondition={me?.profile?.has_medical_condition}
                  onCreated={() => router.replace('/home')} />

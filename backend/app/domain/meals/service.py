@@ -182,17 +182,18 @@ async def adjust_item(
     if not current:
         raise NotFoundError("Meal item not found", code="MEAL_NOT_FOUND")
 
+    effective_portions = portions if portions is not None else current["portions"]
     res = await resolve_item(
         user_id=user_id,
         dish_name=current["dish_name"],
         food_id=current.get("food_id"),
         category=current.get("category"),
-        portions=portions if portions is not None else current["portions"],
+        portions=effective_portions,
         grams_override=grams,
-        portion_unit_override=portion_unit or current["portion_unit"],
+        portion_unit_override=portion_unit,
     )
     patch = {
-        "portions": portions if portions is not None else current["portions"],
+        "portions": effective_portions,
         "portion_unit": res.portion_unit,
         "grams": res.grams,
         "nutrients": res.nutrients,
