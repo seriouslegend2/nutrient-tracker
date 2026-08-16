@@ -3,15 +3,15 @@
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-setup:  ## Install everything and link the Supabase project
+setup:  ## Install backend, frontend, and root dependencies
 	cd backend && uv sync
 	cd customer-app && npm install
 	cd internal-dashboard && npm install
 	npm install
-	@echo "Now: supabase link --project-ref YOUR_REF && make migrate"
+	@echo "Now: npx supabase link --project-ref YOUR_REF && make migrate"
 
 migrate:  ## Push migrations to Supabase
-	supabase db push
+	npx supabase db push
 
 seed:  ## Seed the optional 61-dish curated starter set
 	uv run --project backend python seeds/seed_dishes.py

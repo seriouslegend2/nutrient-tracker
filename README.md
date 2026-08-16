@@ -1,196 +1,258 @@
 # Nutrient Tracker
 
-Nutrient Tracker is a multi-user calorie and nutrition tracker with a FastAPI API,
-a mobile-first Next.js customer application, an internal Next.js dashboard, and a
-Supabase/Postgres database.
+Nutrient Tracker is a multi-user nutrition tracker with:
 
-## Current Product
+- a FastAPI backend on port `8000`;
+- a mobile-first Next.js customer app on port `3000`;
+- a Next.js internal dashboard on port `3001`;
+- Supabase Auth and PostgreSQL;
+- optional OpenAI and LangSmith integrations for chat, voice, images, and PDFs.
 
-The implemented customer flow includes:
+All product-data access goes through FastAPI. The Next.js applications use
+Supabase only for server-side authentication and proxy product requests through
+their same-origin `/api` route handlers.
 
-- One-click customer signup and login through Supabase Google OAuth, logout,
-  and required first-run onboarding.
-- Manual meal logging by date and meal type, substring dish search, category/
-  household serving resolution, and version-preserving serving-count edits/deletes.
-- Concurrent daily, weekly, monthly, and fixed-period goals for weight, calories,
-  protein, carbs, fat, hydration, and explicit training check-ins, including
-  calorie floors, rate clamps, BMI checks, protein/hydration guards, and
-  medical-condition guards.
-- Daily calorie/macro totals, per-goal Today/period/calendar progress, hydration logging/history, weight
-  history, and day/week/month charts for calories, macros, micronutrients, and
-  goal-versus-actual values.
-- An optional `nutrition_chat` agent for conversational reads and explicitly
-  confirmed mutations.
-- Separate `media_facts`, `media_meal_resolver`, and `manual_meal_resolver`
-  agents. Media resolution can map or create catalog dishes but produces only a
-  serving-based review draft; customer meal rows are not written until confirmation.
-  Prompt-free OpenAI speech-to-text sends audio transcripts to `nutrition_chat`.
-- A paginated, admin-gated dashboard with user overview, meals, goals,
-  preferences, conversations, agent runs, aggregate agent metrics, and portion
-  resolution metrics.
+## Repository Structure
 
-The backend exposes OpenAPI at `http://localhost:8000/docs`. List APIs use a
-shared paginated envelope; meals also support a `(meal_date, id)` cursor.
+```text
+nutrient-tracker/
+├── backend/                       FastAPI application and Python environment
+│   ├── app/
+│   │   ├── agents/                Nutrition chat and specialist media resolvers
+│   │   ├── api/v1/                Customer and admin HTTP routes
+│   │   ├── config/                Runtime settings
+│   │   ├── core/                  Auth, RBAC, errors, pagination, middleware
+│   │   ├── domain/                Meals, dishes, goals, profile, water, reports
+│   │   ├── router_registry/       FastAPI route registration
+│   │   ├── services/              Supabase, prompts, speech, media draft logic
+│   │   └── main.py                FastAPI entry point
+│   ├── scripts/                   Prompt publishing and live agent verification
+│   ├── tests/                     Backend unit and database integration tests
+│   ├── .env.example               Backend-only environment template
+│   └── pyproject.toml              Python dependencies and tooling
+├── customer-app/                  Customer Next.js application
+│   ├── app/                       Pages and same-origin BFF route handlers
+│   ├── src/components/            Customer UI
+│   ├── src/lib/                   API client, auth, nutrition helpers
+│   └── .env.example               Customer environment template
+├── internal-dashboard/            Admin Next.js application and BFF
+│   └── .env.example               Dashboard environment template
+├── supabase/
+│   ├── migrations/                22 ordered PostgreSQL migrations
+│   └── config.toml                Local Supabase configuration
+├── seeds/seed_dishes.py           Optional curated food seed
+├── e2e/                           Hosted Playwright journeys
+├── scripts/                       Repository boundary checks and token helper
+├── Makefile                       Main development commands
+├── package.json                   Root Playwright tooling only
+└── .env.example                   Environment reference; do not copy into an app
+```
 
 ## Architecture
 
 ```text
-browser
-  -> same-origin Next.js pages and /api routes
-  -> FastAPI /api/v1 routes
-  -> one server-side Supabase service-role client
-  -> Postgres
+Browser
+  -> Next.js page
+  -> same-origin Next.js /api route (BFF)
+  -> FastAPI /api/v1
+  -> server-side Supabase service-role client
+  -> PostgreSQL
 ```
 
-`backend/` is the only application that accesses product tables. The frontends
-use `@supabase/ssr` only for server-side authentication and session refresh;
-application data always goes through their route-handler BFFs and FastAPI.
-`scripts/check-frontend-isolation.sh` enforces that source boundary.
-
-Authentication has two stages:
-
-1. The customer BFF starts Google OAuth with `prompt=select_account`, so Google
-   displays the accounts currently signed into the browser. Supabase creates a
-   new auth user for a first-time Google identity or signs in the existing one,
-   then the customer callback exchanges the code server-side. The dashboard
-   remains a separate sign-in-only operator surface. Both apps support logout. Their server-side
-   Supabase session bridges keep auth tokens in `httpOnly`, `sameSite=lax`, and
-   production-`secure` cookies; no service-role key is present in either
-   frontend.
-2. Before proxying a protected request, the BFF verifies the Supabase user and
-   signs a user-specific HS256 bearer containing `user_id`. FastAPI verifies that
-   bearer and loads the user's roles from `user_roles`; token-supplied roles are
-   not trusted for authorization.
-
-FastAPI uses `SUPABASE_SERVICE_ROLE_KEY`, so its database calls bypass RLS.
-User-id scoping in repositories and backend RBAC are therefore the primary
-application authorization controls. RLS remains enabled as defense in depth for
-other database access paths; it is not evaluated for service-role backend calls.
-
-The generated BFF bearers have no expiry claim. Rotating `JWT_SECRET_KEY` and
-both `BACKEND_JWT_SECRET` values invalidates all of them at once. Keep this shared
-secret server-only and at least 32 bytes.
-
-## Repository Map
-
-```text
-backend/app/
-  api/v1/                 FastAPI routers, including admin routes
-  agents/
-    nutrition_chat/       tool-using conversational agent
-    media_facts/          factual image/PDF evidence agent
-    media_meal_resolver/  draft-only media catalog resolver
-    manual_meal_resolver/ direct-log manual catalog resolver
-  core/                   auth, RBAC, pagination, errors
-  domain/                 meals, dishes, goals, profile, reports, water, admin
-  services/               Supabase client, media provider I/O, identity
-customer-app/             Next.js customer UI and same-origin BFF routes
-internal-dashboard/       Next.js admin UI and same-origin BFF routes
-supabase/migrations/      16 ordered SQL migrations
-seeds/seed_dishes.py      optional 61-dish curated starter seed
-```
+The browser never receives `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET_KEY`, or
+`BACKEND_JWT_SECRET`.
 
 ## Prerequisites
 
-| Tool | Supported baseline |
-|---|---|
-| Python | 3.13+ |
-| `uv` | current release |
-| Node.js | 22+ |
-| Supabase CLI | current release |
-| Docker | only for the Postgres integration suite |
-| Playwright Chromium | installed by `make e2e-install` |
+Install:
 
-The checked-in lockfiles currently resolve FastAPI 0.141.1, Pydantic 2.13.4,
-Supabase Python 2.31.0, LangChain 1.3.15, LangGraph 1.2.11, Next.js 16.3.1,
-React 19.2.8, and Recharts 2.15.4.
+- Python `3.13+`
+- [`uv`](https://docs.astral.sh/uv/)
+- Node.js `22+` and npm
+- Docker, if running Supabase locally or the database integration environment
+- Supabase CLI through `npx supabase` (no global installation is required)
 
-## Configuration
+## First-Time Setup
 
-Use the app-specific examples. Do not copy the root environment reference into
-an application.
+From the repository root:
 
 ```bash
+make setup
+
 cp backend/.env.example backend/.env
 cp customer-app/.env.example customer-app/.env.local
 cp internal-dashboard/.env.example internal-dashboard/.env.local
 ```
 
-- `backend/.env` contains `SUPABASE_SERVICE_ROLE_KEY` and must remain backend-only.
-- Both frontend files contain the public Supabase Auth configuration plus the
-  server-only `BACKEND_API_URL` and `BACKEND_JWT_SECRET`.
-- `JWT_SECRET_KEY` in the backend must exactly match `BACKEND_JWT_SECRET` in both
-  BFFs.
-- `OPENAI_API_KEY` is optional. Manual onboarding, meals, goals, reports, and
-  hydration remain usable without it; unmatched meals stay honestly unresolved,
-  media reports that AI is disabled, and the chat assistant cannot complete turns.
-  `DEMO_KEY` is suitable for development only.
-- `ORCHESTRATION_MODEL` defaults to `gpt-5.4` for the top-level nutrition chat.
-  Specialist extraction and food-resolution models remain independently configurable.
-- `MANUAL_RESOLVER_MODEL` defaults to `gpt-4.1-mini` and is used only for
-  unmatched manual dish classification and provider-reference selection.
-- `MEDIA_MEAL_RESOLVER_MODEL` independently configures draft-only media dish
-  resolution.
-- `LANGSMITH_API_KEY` is optional. When configured, agent runs are traced to
-  `LANGSMITH_PROJECT` and four runtime prompts are pulled from LangSmith:
-  `media-facts-v1`, `media-meal-resolver-v1`, `manual-meal-resolver-v1`,
-  and `nutrition-chat-v1`.
-  Any unavailable or invalid remote prompt falls back to its checked-in string.
-- Publish the checked-in prompt set and create/update the tracing project with
-  `cd backend && uv run python -m scripts.publish_prompts`.
-- A supplied service-role key was exposed and must be rotated in Supabase before
-  it is used. Never commit, publish, or paste its value into documentation.
-- The actual local environment files currently contain public project values
-  and placeholders for the rotated service-role key and replacement JWT secret.
-  Replace the placeholders after rotation; the checked-in examples deliberately
-  remain generic.
+`make setup` installs the backend, both Next.js applications, and root
+Playwright dependencies. It does not start or configure Supabase.
 
-### Supabase Google Authentication
+### Required Environment Values
 
-Google OAuth does not require Supabase Pro, custom SMTP, email templates, or a
-separate application OTP.
+`backend/.env`:
 
-1. In Google Cloud Console, configure an OAuth consent screen and create a Web
-   application OAuth client.
-2. Add `https://YOUR_PROJECT_REF.supabase.co/auth/v1/callback` as an authorized
-   redirect URI in that Google client.
-3. In Supabase **Authentication > Providers > Google**, enable Google and enter
-   the client ID and client secret.
-4. In Supabase **Authentication > URL Configuration**, set the Site URL to the
-   customer origin and allow `http://localhost:3000/auth/callback` for local
-   development plus the equivalent deployed callback.
-5. The customer button opens Google's account chooser. New identities sign up;
-   existing identities sign in; both return through `/auth/callback`.
+```dotenv
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_ANON_KEY=YOUR_PUBLIC_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVER_ONLY_SERVICE_ROLE_KEY
+JWT_SECRET_KEY=ONE_SHARED_SECRET_AT_LEAST_32_BYTES
+```
 
-After customer signup or first login, the auth-user bootstrap creates the
-application user and customer role. The customer app then requires first-run
-onboarding before protected product pages are used. Grant dashboard access
-separately as described below.
+Both `customer-app/.env.local` and `internal-dashboard/.env.local`:
 
-## Install And Run
+```dotenv
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_PUBLIC_ANON_KEY
+BACKEND_API_URL=http://localhost:8000
+BACKEND_JWT_SECRET=ONE_SHARED_SECRET_AT_LEAST_32_BYTES
+```
+
+`JWT_SECRET_KEY` and both `BACKEND_JWT_SECRET` values must be identical.
+Never put the service-role key in either frontend environment.
+
+Optional backend settings:
+
+```dotenv
+OPENAI_API_KEY=
+ORCHESTRATION_MODEL=gpt-5.4
+MANUAL_RESOLVER_MODEL=gpt-4.1-mini
+MEDIA_MEAL_RESOLVER_MODEL=gpt-4.1-mini
+VISION_MODEL=gpt-4.1-mini
+AUDIO_MODEL=gpt-4o-mini-transcribe
+
+LANGSMITH_API_KEY=
+LANGSMITH_WORKSPACE_ID=
+LANGSMITH_PROJECT=nutrient-tracker-agents
+LANGSMITH_TRACING=false
+```
+
+Without `OPENAI_API_KEY`, normal meals, goals, hydration, reports, and account
+features still work. Chat, transcription, and media extraction report that AI is
+disabled.
+
+## Database Setup
+
+Choose either a hosted Supabase project or a local Supabase stack.
+
+### Option A: Hosted Supabase
+
+Authenticate, link the project, and apply migrations:
 
 ```bash
-make setup
-supabase link --project-ref YOUR_PROJECT_REF
-make migrate
-make seed       # optional curated starter dishes; reruns create new versions
+npx supabase login
+npx supabase link --project-ref YOUR_PROJECT_REF
+npx supabase db push
+```
+
+If project linking is unavailable but you have a percent-encoded Postgres URL:
+
+```bash
+npx supabase db push --db-url "$DATABASE_URL" --include-all
+```
+
+Do not place the database password or `DATABASE_URL` in the repository.
+
+### Option B: Local Supabase
+
+Docker must be running:
+
+```bash
+npx supabase start
+npx supabase db reset
+```
+
+Use the URL and keys printed by `npx supabase status` in the three application
+environment files. Local services from `supabase/config.toml` include:
+
+| Local service | URL |
+|---|---|
+| Supabase API | `http://127.0.0.1:54321` |
+| PostgreSQL | `postgresql://postgres:postgres@127.0.0.1:54322/postgres` |
+| Supabase Studio | `http://127.0.0.1:54323` |
+
+Stop the local stack with:
+
+```bash
+npx supabase stop
+```
+
+### Optional Food Seed
+
+After migrations and backend environment configuration:
+
+```bash
+make seed
+```
+
+This loads the curated starter dish set. It is optional; rerunning it creates new
+catalog versions.
+
+## Run The Repository
+
+Start all three applications from the repository root:
+
+```bash
 make dev
 ```
 
-| Service | URL |
+Open:
+
+| Application | URL |
 |---|---|
-| Customer application | `http://localhost:3000` |
+| Customer app | `http://localhost:3000` |
 | Internal dashboard | `http://localhost:3001` |
-| FastAPI/OpenAPI | `http://localhost:8000/docs` |
+| FastAPI docs | `http://localhost:8000/docs` |
+| FastAPI health | `http://localhost:8000/health` |
 
-The API requires a reachable Supabase project during startup. `make dev` does
-not start Supabase or Postgres.
+`make dev` starts only the backend and Next.js applications. Supabase must
+already be reachable.
 
-### Grant An Admin Role
+### Run Services Separately
 
-Sign in once so the auth-user bootstrap creates the application user, then run
-the following in the Supabase SQL editor using an appropriately privileged
-operator:
+Use three terminals:
+
+```bash
+# Terminal 1: backend
+make backend
+
+# Terminal 2: customer app
+cd customer-app
+npm run dev
+
+# Terminal 3: internal dashboard
+cd internal-dashboard
+npm run dev
+```
+
+Production-style local builds:
+
+```bash
+cd customer-app && npm run build && npm run start
+cd internal-dashboard && npm run build && npm run start
+cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Run each command in a separate terminal because both Next.js `start` commands
+remain active.
+
+## Authentication
+
+The customer app uses Supabase Google OAuth. Configure Google in Supabase before
+using sign-in:
+
+1. Create a Google Web OAuth client.
+2. Add `https://YOUR_PROJECT_REF.supabase.co/auth/v1/callback` to its authorized
+   redirect URIs.
+3. Enable Google under Supabase **Authentication > Providers**.
+4. Add `http://localhost:3000/auth/callback` under Supabase **Authentication >
+   URL Configuration > Redirect URLs**.
+
+The first customer login creates the application user and customer role through
+the database bootstrap migration, then redirects to onboarding.
+
+### Grant Dashboard Access
+
+Sign in once, then run this in the Supabase SQL editor:
 
 ```sql
 INSERT INTO public.user_roles (user_id, role)
@@ -200,137 +262,106 @@ WHERE email = 'you@example.com'
 ON CONFLICT (user_id, role) DO NOTHING;
 ```
 
-Roles are stored in `user_roles`, not user-editable Supabase metadata.
+The dashboard verifies this database role; Supabase user metadata is not trusted
+for authorization.
 
-## Data And Goal Model
+## AI And Prompt Setup
 
-Logged portions resolve in this order, and `resolved_from` records the result:
+Nutrition Chat receives all six tools on every turn and chooses tools using their
+descriptions, schemas, current tracker context, and conversation history. Explicit
+text/voice writes execute atomically. Image and PDF meal drafts remain editable
+and require their dedicated Confirm or Discard button.
 
-```text
-meal value -> user's dish override -> user's category override
-           -> global dish default -> global category default -> unknown
-```
-
-Unknown nutrition remains an empty vector and is reported as unaccounted rather
-than counted as zero. Energy is recomputed from macros. Meal days, goals,
-preferences, and portion overrides use database functions for atomic version
-swaps. Body metrics and structural profile changes refresh derived BMI/BMR/TDEE
-and can re-version the active goal.
-
-## Verification
-
-Run the repository's normal checks:
+When LangSmith is configured, publish checked-in prompts with:
 
 ```bash
-make check
+cd backend
+PYTHONPATH=. uv run python scripts/publish_prompts.py
 ```
 
-### Real Hosted Browser E2E
-
-The root Playwright suite exercises real running services and real hosted
-Supabase Auth/PostgREST data. It does not intercept or mock product API calls.
-Agent, conversation, upload, and media-extraction pages are deliberately outside
-the suite. Runtime traces, videos, and JSON results are ignored; named full-page
-screenshots and the final evidence HTML/PDF under `artifacts/` are commit-eligible.
-
-Install Chromium and run schema-independent checks:
+Reusable destructive live-agent verification creates an isolated Supabase user,
+checks real database writes, and deletes the user afterward:
 
 ```bash
-make e2e-install
-make e2e-check
+cd backend
+PYTHONPATH=. uv run python scripts/live_nutrition_chat_matrix.py --dosa-only
+PYTHONPATH=. uv run python scripts/live_nutrition_chat_matrix.py --breakfast-only
 ```
 
-For a hosted run, start the customer app on `:3000`, dashboard on `:3001`, and
-FastAPI on `:8000`, then export credentials without writing them to a repository
-file:
+These commands require real Supabase service-role and OpenAI credentials. Never
+run them against a user account whose data must be preserved.
+
+## Common Commands
+
+Run from the repository root unless shown otherwise:
+
+| Command | Purpose |
+|---|---|
+| `make setup` | Install Python, frontend, and root dependencies |
+| `make dev` | Start backend, customer app, and dashboard |
+| `make backend` | Start only FastAPI with reload |
+| `make migrate` | Push migrations for a linked Supabase project |
+| `make seed` | Load optional curated dishes |
+| `make lint` | Ruff lint and format check |
+| `make typecheck` | Backend boundary checks and frontend TypeScript checks |
+| `make check` | Full repository check target |
+| `make e2e-install` | Install Playwright Chromium |
+| `make e2e-list` | List hosted Playwright scenarios |
+| `make e2e-check` | Compile and statically validate E2E tooling |
+
+Application-specific commands:
 
 ```bash
-export SUPABASE_URL='https://PROJECT_REF.supabase.co'
-export SUPABASE_SERVICE_ROLE_KEY='...'
-export E2E_EMAIL='kaushal@kookar.in'
-export E2E_PASSWORD='...'
-make e2e
+cd backend && uv sync
+cd customer-app && npm install
+cd internal-dashboard && npm install
+
+cd customer-app && npm run build
+cd internal-dashboard && npm run build
 ```
 
-`E2E_CUSTOMER_URL`, `E2E_DASHBOARD_URL`, and `E2E_BACKEND_URL` can override the
-localhost defaults. Application-specific runtime configuration is still required
-by the three services as documented above.
+## Troubleshooting
 
-The secure global setup uses Supabase Auth Admin to find or create and confirm
-`E2E_EMAIL`, updates its password to `E2E_PASSWORD`, ensures the application
-identity/customer role, and grants the admin role through service-role
-PostgREST. It also creates a deterministic `+nutrient-e2e-non-admin` auth alias
-with the same supplied password and explicitly removes its admin role for the
-dashboard-denial test. No password or service key is persisted. The primary E2E
-account's `onboarding_completed_at` is reset before each run so required
-onboarding is exercised; use a dedicated test account because the journey also
-creates goals, meals, hydration, weight, profile, and portion records.
+### Backend cannot reach Supabase
 
-Setup probes all required product tables and non-agent RPCs before opening the
-apps. A missing hosted migration fails with the table/RPC and migration filename
-instead of producing misleading browser failures. The optional curated dish
-scenario is reported as skipped when seed rows do not exist; serving-count meal
-coverage remains mandatory.
-
-`npm run e2e` is an orchestrator: Playwright's exit code remains authoritative,
-but report generation runs even after setup or scenario failure. It emits
-`artifacts/e2e-report.html` and `artifacts/e2e-report.pdf` with scenario status,
-sanitized environment/project reference, failures, timestamp, and embedded
-screenshots. It never turns a failed hosted run into a passing one.
-
-The checked-in evidence was generated on 2026-08-16 from a successful real run:
-all 15 non-agent scenarios passed in 2.3 minutes, producing 17 named screenshots
-and the 9-page `artifacts/e2e-report.pdf`. All provisioned auth users were deleted
-after verification.
-
-Normal push and pull-request CI does not access hosted secrets. The
-`workflow_dispatch` input `run_hosted_e2e` opt-in starts all three services only
-after checking the required repository secrets, runs Chromium, and uploads the
-evidence even on failure.
-
-Run the full database suite in the same shape used by CI:
+Check `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `backend/.env`, then verify:
 
 ```bash
-docker run --rm -d --name nt-verify \
-  -e POSTGRES_PASSWORD=x pgvector/pgvector:pg17
-(cd backend && NT_REQUIRE_DATABASE=1 NT_FAIL_ON_SKIP=1 uv run pytest -q)
-docker stop nt-verify
+curl http://localhost:8000/health
 ```
 
-On 2026-08-17, the repository migrations were applied to an empty
-Supabase-shaped Postgres 17 database and the customer production build passed.
-`npm audit --omit=dev` reported zero production vulnerabilities in each
-frontend.
+### Frontend reports backend auth configuration errors
 
-## Current Limitations
+Confirm that `BACKEND_JWT_SECRET` exists in the app's `.env.local` and exactly
+matches `JWT_SECRET_KEY` in `backend/.env`. Restart both services after changing
+environment files.
 
-- Dish search is normalized substring matching. There is no shipped ranking,
-  BM25, embedding, or combined lexical/vector retrieval.
-- The optional seed is 61 curated dishes plus 19 category defaults from a
-  migration. It does not include a demo user or a complete food corpus.
-- Video uploads are rejected. Images are limited to 10 MB, audio to 25 MB, and
-  PDFs to 20 MB; page and audio-duration limits are not implemented.
-- Upload bytes are sent to the provider for the request but are not stored.
-  Message metadata and extraction output are persisted, so raw-media replay or
-  later visual inspection is unavailable.
-- PDF extraction uses one selected confirmation date and meal type for the
-  reviewed batch; it is not a general document archive/import system.
-- One media-facts prompt handles food photos, nutrition labels, and food-diary PDFs.
-- The customer app has a web manifest but no service worker/offline mode. It has
-  no account export or self-service account deletion.
-- Fixed category units and grams are shown under **You → Your portions**.
-  Customers can edit only how many fixed units make their usual serving. Meal
-  creation and correction choose a serving count; customers cannot redefine
-  category grams or create per-dish portion overrides.
-- The dashboard intentionally has no user search/filter/sort, food-database
-  editor, body-history/audit panels, or account mutation tools.
-- Frontend types are maintained locally; no generated OpenAPI client/type
-  package is checked in.
-- Both frontends have focused Vitest coverage for redirect validation, backend
-  JWT generation, API clients, pagination, and dashboard panel contracts. The
-  checked-in Playwright evidence predates the Google-only customer login change;
-  live Google provider and account-chooser verification, direct-client RLS, and
-  live OpenAI provider calls remain separate verification work.
+### A hosted schema is behind
 
-This is a nutrition tracking tool, not medical advice. Safety rules refuse or
-clamp risky goals but do not replace clinical guidance.
+Inspect migration state and push pending files:
+
+```bash
+npx supabase migration list --linked
+npx supabase db push
+```
+
+### Next.js uses stale route types after deleting a route
+
+Run a production build before typecheck:
+
+```bash
+cd customer-app
+npm run build
+npm run typecheck
+```
+
+## Security Notes
+
+- Never commit `.env`, `.env.local`, database passwords, service-role keys, or
+  OpenAI credentials.
+- Rotate any credential pasted into chat, logs, screenshots, or terminal output.
+- Keep `SUPABASE_SERVICE_ROLE_KEY` backend-only.
+- The backend uses the service-role client, so repository user scoping and RBAC
+  are the primary application authorization boundaries; RLS remains defense in
+  depth for other database access paths.
+- This application is a nutrition tracking tool, not medical advice.
