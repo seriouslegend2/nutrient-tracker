@@ -79,6 +79,7 @@ async def create_global_dish(
         "food_id": str(created["dish_id"]),
         "name": str(created["name"]),
         "category": str(created["category"]),
+        "per_100g": nutrients,
     }
 
 

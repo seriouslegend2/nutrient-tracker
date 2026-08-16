@@ -21,6 +21,52 @@ from app.tools.manual_meal_resolver_tools import manual_meal_resolver_tools
 MANUAL_MEAL_RESOLVER_AGENT_NAME = "manual_meal_resolver"
 
 
+def _tool_payload(result: dict[str, Any], tool_name: str) -> dict[str, Any] | None:
+    for message in reversed(result.get("messages") or []):
+        if getattr(message, "name", None) != tool_name:
+            continue
+        content = getattr(message, "content", None)
+        if isinstance(content, dict):
+            payload = content
+        elif isinstance(content, str):
+            try:
+                payload = json.loads(content)
+            except json.JSONDecodeError:
+                continue
+        else:
+            continue
+        if payload.get("status") == "OK":
+            return payload
+    return None
+
+
+def _resolution_from_tools(result: dict[str, Any]) -> ManualResolution | None:
+    created = _tool_payload(result, "create_global_dish")
+    updated = _tool_payload(result, "update_meal_resolution")
+    meal = (updated or {}).get("meal") or {}
+    updated_meal_id = str(meal["id"]) if meal.get("id") else None
+    if created:
+        return ManualResolution(
+            action="create_new",
+            selected_food_id=str(created["food_id"]),
+            category=str(created["category"]),
+            canonical_name=str(created["name"]),
+            per_100g=created["per_100g"],
+            updated_meal_id=updated_meal_id,
+            confidence="medium",
+            reason="Recovered the successful global-dish tool result.",
+        )
+    if updated and meal.get("food_id"):
+        return ManualResolution(
+            action="match_existing",
+            selected_food_id=str(meal["food_id"]),
+            updated_meal_id=updated_meal_id,
+            confidence="medium",
+            reason="Recovered the successful meal-update tool result.",
+        )
+    return None
+
+
 def _resolver_state(resolver_input: ManualResolverInput) -> dict[str, Any]:
     values = resolver_input.model_dump(mode="json")
     return {
@@ -72,7 +118,9 @@ async def resolve_manual_meal(
     )
     response = result.get("structured_response")
     if response is None:
-        raise ValueError("OpenAI returned no manual meal resolution")
+        response = _resolution_from_tools(result)
+    if response is None:
+        raise ValueError("OpenAI returned no manual meal resolution or successful tool result")
     resolution = (
         response
         if isinstance(response, ManualResolution)

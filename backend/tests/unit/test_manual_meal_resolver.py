@@ -51,6 +51,25 @@ def test_existing_match_discards_irrelevant_model_fields() -> None:
     assert resolution.canonical_name is None
 
 
+def test_successful_create_tool_recovers_missing_structured_response() -> None:
+    resolution = resolver_agent._resolution_from_tools(
+        {
+            "messages": [
+                ToolMessage(
+                    content='{"status":"OK","food_id":"dish-new","name":"Amla","category":"fruit","per_100g":{"protein_g":1,"carbs_g":10,"fat_g":0.5}}',
+                    name="create_global_dish",
+                    tool_call_id="create-1",
+                )
+            ]
+        }
+    )
+
+    assert resolution is not None
+    assert resolution.action == "create_new"
+    assert resolution.selected_food_id == "dish-new"
+    assert resolution.updated_meal_id is None
+
+
 def _resolver_input() -> ManualResolverInput:
     return ManualResolverInput(
         meal_id="meal-1",
