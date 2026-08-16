@@ -9,6 +9,7 @@ from app.agents.runtime_context import NutrientTrackerRuntimeContext
 from app.config.settings import settings
 from app.domain.messages import repository as message_repo
 from app.services.media_extraction import ExtractionResult
+from app.services.prompts import trace_agent
 from app.utils.logger import logger
 
 
@@ -37,18 +38,19 @@ async def run_media_extraction_agent(
         from app.agents.media_extraction.agent import build_media_extraction_agent
 
         agent = await build_media_extraction_agent(config)
-        result = await agent.ainvoke(
-            {
-                "messages": [{"role": "user", "content": "Extract the attached media."}],
-                "mime_type": mime_type,
-                "data_b64": data_b64,
-                "user_text": user_text or "",
-                "filename": filename or "",
-                "samples": samples,
-            },
-            config=config,
-            context=context,
-        )
+        with trace_agent("media_extraction", {"mime_type": mime_type}):
+            result = await agent.ainvoke(
+                {
+                    "messages": [{"role": "user", "content": "Extract the attached media."}],
+                    "mime_type": mime_type,
+                    "data_b64": data_b64,
+                    "user_text": user_text or "",
+                    "filename": filename or "",
+                    "samples": samples,
+                },
+                config=config,
+                context=context,
+            )
         response = result.get("structured_response")
         if not isinstance(response, dict):
             raise RuntimeError("Media extraction agent returned no structured response")
@@ -88,6 +90,9 @@ async def run_media_extraction_agent(
                 "ok": extraction.ok,
                 "detail": extraction.detail,
                 "item_count": len(extraction.payload.get("items") or []),
+                "prompt_name": extraction.prompt_name,
+                "prompt_version": extraction.prompt_version,
+                "prompt_source": extraction.prompt_source,
             },
         }
     )

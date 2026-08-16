@@ -10,7 +10,6 @@ registration - ModelAndPromptMiddleware goes first, always.
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
@@ -19,33 +18,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
 
 from app.config.settings import settings
+from app.services.prompts import resolve_prompt
 from app.utils.logger import logger
-
-_PROMPT_CACHE: dict[str, tuple[str, float]] = {}
-_CACHE_TTL = 60.0
-
-
-async def _pull_langsmith_prompt(name: str) -> str | None:
-    """Best-effort LangSmith pull. Never raises - falls through to the
-    checked-in fallback in prompt.py on any failure, including no LangSmith
-    config at all. LangSmith is an enhancement here, never a requirement."""
-    cached = _PROMPT_CACHE.get(name)
-    if cached and time.time() - cached[1] < _CACHE_TTL:
-        return cached[0]
-
-    if not getattr(settings, "LANGSMITH_API_KEY", ""):
-        return None
-    try:
-        from langsmith import Client
-
-        client = Client()
-        template = client.pull_prompt(name)
-        text = str(template)
-        _PROMPT_CACHE[name] = (text, time.time())
-        return text
-    except Exception as exc:
-        logger.warning("langsmith_pull_failed prompt={} error={}", name, str(exc))
-        return None
 
 
 class ModelAndPromptMiddleware(AgentMiddleware):
@@ -61,10 +35,13 @@ class ModelAndPromptMiddleware(AgentMiddleware):
         return None
 
     async def awrap_model_call(self, request: Any, handler: Any) -> Any:
-        prompt_text = await _pull_langsmith_prompt(self.langsmith_prompt_name)
-        if prompt_text is None:
-            prompt_text = self.fallback_prompt
-            logger.info("using_fallback_prompt agent=nutrition_chat")
+        prompt = await resolve_prompt(self.langsmith_prompt_name, self.fallback_prompt)
+        prompt_text = prompt.text
+        logger.info(
+            "prompt_resolved agent=nutrition_chat source={} version={}",
+            prompt.source,
+            prompt.version or "fallback",
+        )
         state = dict(request.state or {})
         for field in ("user_profile", "active_goal", "preferences"):
             prompt_text = prompt_text.replace(

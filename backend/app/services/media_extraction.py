@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config.settings import settings
+from app.services.prompts import ResolvedPrompt, resolve_prompt
 from app.utils.logger import logger
 
 # ---------------------------------------------------------------------------
@@ -99,6 +100,11 @@ Return ONLY valid JSON:
 
 If a column is ambiguous, say so in columns_detected rather than guessing a mapping."""
 
+FOOD_PHOTO_PROMPT_NAME = "food-photo-v1"
+NUTRITION_LABEL_PROMPT_NAME = "nutrition-label-v1"
+VOICE_LOG_PROMPT_NAME = "voice-log-v1"
+FOOD_DIARY_PDF_PROMPT_NAME = "food-diary-pdf-v1"
+
 
 MEDIA_SIZE_LIMITS = {
     "image/jpeg": 10 * 1024 * 1024,
@@ -135,6 +141,9 @@ class ExtractionResult:
     input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None
+    prompt_name: str | None = None
+    prompt_version: str | None = None
+    prompt_source: str | None = None
 
     def as_tagged(self, msg_type: str) -> str:
         """Splice into the message body as tags - KookarCore's exact shape."""
@@ -218,7 +227,9 @@ async def _call_openai_media(prompt: str, media_b64: str, mime: str) -> Provider
     return _provider_output(response, fallback_model=settings.VISION_MODEL)
 
 
-async def _transcribe_openai_audio(data_b64: str, mime: str) -> ProviderOutput:
+async def _transcribe_openai_audio(
+    data_b64: str, mime: str, prompt: str = VOICE_LOG_PROMPT
+) -> ProviderOutput:
     """Transcribe audio with OpenAI's lowest-cost transcription model."""
     from openai import AsyncOpenAI
 
@@ -234,7 +245,7 @@ async def _transcribe_openai_audio(data_b64: str, mime: str) -> ProviderOutput:
     response = await client.audio.transcriptions.create(
         model=settings.AUDIO_MODEL,
         file=(f"voice-note.{extension}", base64.b64decode(data_b64), mime),
-        prompt="Transcribe exactly what the user says about food, portions, or nutrition.",
+        prompt=prompt,
     )
     return _provider_output(response, fallback_model=settings.AUDIO_MODEL)
 
@@ -332,6 +343,14 @@ def _usage_totals(outputs: list[ProviderOutput]) -> dict[str, Any]:
     }
 
 
+def _prompt_metadata(prompt: ResolvedPrompt) -> dict[str, str | None]:
+    return {
+        "prompt_name": prompt.name,
+        "prompt_version": prompt.version,
+        "prompt_source": prompt.source,
+    }
+
+
 async def extract_media(
     *,
     mime_type: str,
@@ -363,7 +382,10 @@ async def extract_media(
     try:
         if mime_type.startswith("image/"):
             if _is_nutrition_label_request(text, filename):
-                prompt = NUTRITION_LABEL_PROMPT
+                resolved_prompt = await resolve_prompt(
+                    NUTRITION_LABEL_PROMPT_NAME, NUTRITION_LABEL_PROMPT
+                )
+                prompt = resolved_prompt.text
                 if text:
                     prompt += f"\n\nThe user added this context: {text}"
                 provider_output = _provider_output(
@@ -375,6 +397,7 @@ async def extract_media(
                     return ExtractionResult(
                         ok=False,
                         detail="I couldn't read that nutrition label. Try a closer, sharper photo.",
+                        **_prompt_metadata(resolved_prompt),
                         **_usage_totals([provider_output]),
                     )
                 parsed["source_metadata"] = {
@@ -387,10 +410,12 @@ async def extract_media(
                 return ExtractionResult(
                     text=f"Nutrition label{f' with a {serving} g serving' if serving else ''}",
                     payload=parsed,
+                    **_prompt_metadata(resolved_prompt),
                     **_usage_totals([provider_output]),
                 )
 
-            prompt = FOOD_PHOTO_PROMPT
+            resolved_prompt = await resolve_prompt(FOOD_PHOTO_PROMPT_NAME, FOOD_PHOTO_PROMPT)
+            prompt = resolved_prompt.text
             if text:
                 prompt += f"\n\nThe user added this context: {text}"
             responses = await asyncio.gather(
@@ -413,6 +438,7 @@ async def extract_media(
                     ok=False,
                     detail="I couldn't read that photo. Try again with more light, "
                     "or just tell me what you ate.",
+                    **_prompt_metadata(resolved_prompt),
                     **_usage_totals(provider_outputs),
                 )
             payload = _merge_samples(runs)
@@ -427,15 +453,22 @@ async def extract_media(
                     ok=False,
                     detail="That photo is hard to read - a retake with more light "
                     "would help, or tell me what you ate.",
+                    **_prompt_metadata(resolved_prompt),
                     **_usage_totals(provider_outputs),
                 )
             return ExtractionResult(
-                text=_describe(payload), payload=payload, **_usage_totals(provider_outputs)
+                text=_describe(payload),
+                payload=payload,
+                **_prompt_metadata(resolved_prompt),
+                **_usage_totals(provider_outputs),
             )
 
         if mime_type.startswith("audio/"):
+            resolved_prompt = await resolve_prompt(VOICE_LOG_PROMPT_NAME, VOICE_LOG_PROMPT)
             provider_output = _provider_output(
-                await _transcribe_openai_audio(data_b64 or "", mime_type),
+                await _transcribe_openai_audio(
+                    data_b64 or "", mime_type, resolved_prompt.text
+                ),
                 fallback_model=settings.AUDIO_MODEL,
             )
             transcript = provider_output.text.strip()
@@ -444,13 +477,21 @@ async def extract_media(
                     ok=False,
                     detail="I got your voice note but couldn't hear any speech. "
                     "Send it again, or type what you ate.",
+                    **_prompt_metadata(resolved_prompt),
                     **_usage_totals([provider_output]),
                 )
-            return ExtractionResult(text=transcript, **_usage_totals([provider_output]))
+            return ExtractionResult(
+                text=transcript,
+                **_prompt_metadata(resolved_prompt),
+                **_usage_totals([provider_output]),
+            )
 
         if mime_type == "application/pdf":
+            resolved_prompt = await resolve_prompt(
+                FOOD_DIARY_PDF_PROMPT_NAME, FOOD_DIARY_PDF_PROMPT
+            )
             provider_output = _provider_output(
-                await _call_openai_media(FOOD_DIARY_PDF_PROMPT, data_b64 or "", mime_type),
+                await _call_openai_media(resolved_prompt.text, data_b64 or "", mime_type),
                 fallback_model=settings.VISION_MODEL,
             )
             payload = _parse_json(provider_output.text)
@@ -460,6 +501,7 @@ async def extract_media(
                 return ExtractionResult(
                     ok=False,
                     detail="I couldn't find any reviewable food diary rows in that PDF.",
+                    **_prompt_metadata(resolved_prompt),
                     **_usage_totals([provider_output]),
                 )
             payload["items"] = items
@@ -474,6 +516,7 @@ async def extract_media(
                 f"({payload.get('date_range', {}).get('from', '?')} to "
                 f"{payload.get('date_range', {}).get('to', '?')})",
                 payload=payload,
+                **_prompt_metadata(resolved_prompt),
                 **_usage_totals([provider_output]),
             )
 

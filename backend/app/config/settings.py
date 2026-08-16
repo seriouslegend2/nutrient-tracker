@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     VISION_MODEL: str = "gpt-4.1-nano"
     AUDIO_MODEL: str = "gpt-4o-mini-transcribe"
 
+    # --- LangSmith (optional prompt registry + tracing) -------------------
+    LANGSMITH_API_KEY: str = ""
+    LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"
+    LANGSMITH_PROJECT: str = "nutrient-tracker-agents"
+    LANGSMITH_TRACING: bool = False
+
     # --- cache (optional; the app runs without it) ------------------------
     REDIS_URL: str = ""
 

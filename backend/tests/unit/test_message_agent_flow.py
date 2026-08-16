@@ -17,6 +17,7 @@ from app.core.exceptions import ValidationError
 from app.domain.meals import drafts
 from app.services import media_extraction
 from app.services.media_extraction import MEDIA_SIZE_LIMITS, ExtractionResult
+from app.services.prompts import ResolvedPrompt
 
 
 class FakeUpload:
@@ -26,6 +27,14 @@ class FakeUpload:
 
     async def read(self) -> bytes:
         return b"image-bytes"
+
+
+@pytest.fixture(autouse=True)
+def checked_in_media_prompts(monkeypatch) -> None:
+    async def resolve(name: str, fallback: str) -> ResolvedPrompt:
+        return ResolvedPrompt(name=name, text=fallback, source="code")
+
+    monkeypatch.setattr(media_extraction, "resolve_prompt", resolve)
 
 
 def _message_store(monkeypatch) -> list[dict[str, Any]]:

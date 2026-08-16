@@ -10,6 +10,7 @@ from app.agents.nutrition_chat.models import ChatTurn
 from app.agents.runtime_context import NutrientTrackerRuntimeContext
 from app.config.settings import settings
 from app.domain.messages import repository as message_repo
+from app.services.prompts import trace_agent
 from app.utils.logger import logger
 
 _EXPLICIT_MUTATION = re.compile(
@@ -130,18 +131,19 @@ async def run_nutrition_chat_agent(
             allow_mutations=allow_mutations,
             allow_nutrition_entry=_confirmed_follow_up(messages, payload),
         )
-        result = await agent.ainvoke(
-            {
-                "messages": messages,
-                "user_id": user_id,
-                "user_profile": "",
-                "active_goal": "",
-                "preferences": "",
-                "extraction_payload": payload,
-            },
-            config=config,
-            context=context,
-        )
+        with trace_agent("nutrition_chat", {"allow_mutations": allow_mutations}):
+            result = await agent.ainvoke(
+                {
+                    "messages": messages,
+                    "user_id": user_id,
+                    "user_profile": "",
+                    "active_goal": "",
+                    "preferences": "",
+                    "extraction_payload": payload,
+                },
+                config=config,
+                context=context,
+            )
         response = result.get("structured_response")
         if response is None:
             raise RuntimeError("Nutrition agent returned no structured response")

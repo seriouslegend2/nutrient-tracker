@@ -120,6 +120,11 @@ cp internal-dashboard/.env.example internal-dashboard/.env.local
 - `OPENAI_API_KEY` is optional. Manual onboarding, meals, goals, reports, and
   hydration remain usable without it; media reports that AI is disabled and
   the chat assistant cannot complete turns.
+- `LANGSMITH_API_KEY` is optional. When configured, agent runs are traced to
+  `LANGSMITH_PROJECT` and all five runtime prompts are pulled from LangSmith.
+  Any unavailable or invalid remote prompt falls back to its checked-in string.
+- Publish the checked-in prompt set and create/update the tracing project with
+  `cd backend && uv run python -m scripts.publish_prompts`.
 - A supplied service-role key was exposed and must be rotated in Supabase before
   it is used. Never commit, publish, or paste its value into documentation.
 - The actual local environment files currently contain public project values
@@ -280,7 +285,7 @@ docker stop nt-verify
 ```
 
 On 2026-08-16, that complete suite applied all 16 migrations to an empty
-Supabase-shaped Postgres 17 database and reported `124 passed`. The customer
+Supabase-shaped Postgres 17 database and reported `126 passed`. The customer
 test suite reported `46 passed`, the dashboard suite reported `23 passed`, and
 `npm audit --omit=dev` reported zero production vulnerabilities in each
 frontend. See `STATUS.html` for the other commands run and the exact boundary of

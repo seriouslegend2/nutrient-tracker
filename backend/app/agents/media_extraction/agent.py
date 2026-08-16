@@ -41,6 +41,9 @@ async def _extract_media_node(
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,
         "cost_usd": result.cost_usd,
+        "prompt_name": result.prompt_name,
+        "prompt_version": result.prompt_version,
+        "prompt_source": result.prompt_source,
     }
     logger.info(
         "media_extraction_agent_completed user_id={} mime={} ok={}",
