@@ -11,6 +11,7 @@ import { inclusiveDateRange, isISODate, localDateISO, shiftISODate, startOfWeekI
 import { formatNutrientValue, otherNutrients, primaryNutrients, scaleNutrients } from '@/lib/nutrients'
 
 const SLOTS = ['breakfast', 'brunch', 'lunch', 'snacks', 'dinner', 'misc'] as const
+type MealSlot = (typeof SLOTS)[number]
 const SLOT_LABEL: Record<string, string> = {
   breakfast: 'Breakfast', brunch: 'Brunch', lunch: 'Lunch', snacks: 'Snacks', dinner: 'Dinner', misc: 'Other',
 }
@@ -28,6 +29,7 @@ export function MealsClient() {
   const [selected, setSelected] = useState(initialDate)
   const [rangeStart, setRangeStart] = useState(initialRangeStart)
   const [rangeEnd, setRangeEnd] = useState(shiftISODate(initialRangeStart, 6))
+  const [slotFilter, setSlotFilter] = useState<MealSlot[]>([])
   const [adding, setAdding] = useState<{ date: string; slot: string } | null>(
     requestedSlot && SLOTS.some((slot) => slot === requestedSlot)
       ? { date: initialDate, slot: requestedSlot }
@@ -82,6 +84,11 @@ export function MealsClient() {
     }
     selectDate(today, true)
   }
+  const toggleSlot = (slot: MealSlot) => {
+    setSlotFilter((current) => current.includes(slot)
+      ? current.length === 1 ? [] : current.filter((value) => value !== slot)
+      : [...current, slot])
+  }
 
   return (
     <div className="app-shell px-4 pt-6 sm:px-6">
@@ -117,6 +124,18 @@ export function MealsClient() {
         </div>
       </section>
 
+      <section className="card mb-3 p-4" aria-labelledby="meal-slot-filter-heading">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id="meal-slot-filter-heading" className="font-semibold">Filter meal slots</h2>
+          <span className="text-xs" style={{ color: 'var(--color-tx2)' }}>{slotFilter.length ? `${slotFilter.length} selected` : 'Showing all'}</span>
+        </div>
+        <div className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label="Meal slots to show">
+          <SlotFilterButton label="All" selected={slotFilter.length === 0} onClick={() => setSlotFilter([])} />
+          {SLOTS.map((slot) => <SlotFilterButton key={slot} label={SLOT_LABEL[slot]}
+            selected={slotFilter.includes(slot)} onClick={() => toggleSlot(slot)} />)}
+        </div>
+      </section>
+
       <div className="sticky top-0 z-40 -mx-4 mb-5 border-y px-4 py-2 shadow-sm backdrop-blur sm:-mx-6 sm:px-6"
         style={{ borderColor: 'var(--color-line)', background: 'color-mix(in oklch, var(--color-bg) 92%, transparent)' }}>
         <div className="mx-auto flex max-w-[720px] gap-2 overflow-x-auto py-1" role="tablist" aria-label="Jump to a meal day">
@@ -140,6 +159,10 @@ export function MealsClient() {
         {range.map((date, index) => {
           const dayQuery = dayQueries[index]
           const populatedSlots = SLOTS.filter((slot) => (dayQuery.data?.slots?.[slot]?.length ?? 0) > 0)
+          const visibleSlots = slotFilter.length
+            ? populatedSlots.filter((slot) => slotFilter.includes(slot))
+            : populatedSlots
+          const visibleItems = visibleSlots.flatMap((slot) => dayQuery.data?.slots?.[slot] ?? [])
           const dateLabel = new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
             weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
           })
@@ -154,10 +177,10 @@ export function MealsClient() {
 
             {adding?.date === date && <ManualMealForm date={date} initialSlot={adding.slot}
               onCancel={() => setAdding(null)} onCreated={() => { setAdding(null); changed(date) }} />}
-            {dayQuery.data && <DayTotals day={dayQuery.data} />}
+            {dayQuery.data && <DayTotals day={dayQuery.data} visibleItems={slotFilter.length ? visibleItems : undefined} />}
             {dayQuery.isError ? <section className="card p-5"><p className="font-semibold">Meals could not be loaded.</p><button className="action-button mt-3" onClick={() => dayQuery.refetch()}>Try again</button></section>
               : dayQuery.isLoading ? <section className="card p-5">Loading meals…</section>
-              : populatedSlots.length ? populatedSlots.map((slot) => {
+              : visibleSlots.length ? visibleSlots.map((slot) => {
                 const items = dayQuery.data?.slots?.[slot] ?? []
                 return <section key={slot} className="card mb-3 p-5">
                   <div className="mb-2 flex items-baseline justify-between">
@@ -169,14 +192,26 @@ export function MealsClient() {
                   {items.map((item) => <MealRow key={item.id} item={item} onChange={() => changed(date)} />)}
                   <button onClick={() => addMeal(date, slot)} className="action-button mt-3 w-full">+ Add {SLOT_LABEL[slot].toLowerCase()}</button>
                 </section>
-              }) : <section className="card p-5 text-center"><p className="text-sm" style={{ color: 'var(--color-tx2)' }}>Nothing logged on this day.</p>
-                <button onClick={() => addMeal(date)} className="action-button mt-3">+ Add the first meal</button></section>}
+              }) : <section className="card p-5 text-center"><p className="text-sm" style={{ color: 'var(--color-tx2)' }}>{slotFilter.length && populatedSlots.length ? 'No meals logged in the selected slots.' : 'Nothing logged on this day.'}</p>
+                {slotFilter.length && populatedSlots.length
+                  ? <button onClick={() => setSlotFilter([])} className="action-button mt-3">Show all meal slots</button>
+                  : <button onClick={() => addMeal(date)} className="action-button mt-3">+ Add the first meal</button>}</section>}
           </section>
         })}
       </div>
       <BottomNav />
     </div>
   )
+}
+
+function SlotFilterButton({ label, selected, onClick }: { label: string; selected: boolean; onClick: () => void }) {
+  return <button type="button" aria-pressed={selected} onClick={onClick}
+    className="min-h-10 shrink-0 rounded-full border px-4 text-sm font-semibold"
+    style={{
+      borderColor: selected ? 'var(--color-accent)' : 'var(--color-line)',
+      background: selected ? 'var(--color-accent-soft)' : 'var(--color-surface)',
+      color: selected ? 'var(--color-accent-strong)' : 'var(--color-tx2)',
+    }}>{label}</button>
 }
 
 function ManualMealForm({ date, initialSlot, onCancel, onCreated }: {
@@ -271,15 +306,23 @@ function ManualMealForm({ date, initialSlot, onCancel, onCreated }: {
   </section>
 }
 
-function DayTotals({ day }: { day: Day }) {
-  const totals = day.totals ?? {}
+function DayTotals({ day, visibleItems }: { day: Day; visibleItems?: Meal[] }) {
+  const totals = visibleItems
+    ? visibleItems.reduce<Record<string, number>>((sum, item) => {
+        Object.entries(item.nutrients ?? {}).forEach(([key, value]) => { sum[key] = (sum[key] ?? 0) + value })
+        return sum
+      }, {})
+    : day.totals ?? {}
+  const unaccountedItems = visibleItems
+    ? visibleItems.filter((item) => !item.nutrients || Object.keys(item.nutrients).length === 0).length
+    : day.unaccounted_items
   return <section className="card mb-4 p-4"><div className="grid grid-cols-4 divide-x text-sm" style={{ borderColor: 'var(--color-line)' }}>
     {(['calories_kcal', 'protein_g', 'carbs_g', 'fat_g'] as const).map((key) => <div key={key} className="text-center">
       <div className="display-title tabular-nums text-xl">{Math.round(totals[key] ?? 0)}</div>
       <div className="text-sm capitalize" style={{ color: 'var(--color-tx2)' }}>{key === 'calories_kcal' ? 'kcal' : key.replace('_g', '')}</div>
     </div>)}
-  </div>{day.unaccounted_items > 0 && <p className="mt-3 text-xs" style={{ color: 'var(--color-warn)' }}>
-    {day.unaccounted_items} item{day.unaccounted_items > 1 ? 's' : ''} excluded because nutrition is unknown.</p>}</section>
+  </div>{unaccountedItems > 0 && <p className="mt-3 text-xs" style={{ color: 'var(--color-warn)' }}>
+    {unaccountedItems} item{unaccountedItems > 1 ? 's' : ''} excluded because nutrition is unknown.</p>}</section>
 }
 
 function MealRow({ item, onChange }: { item: Meal; onChange: () => void }) {

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { BottomNav } from '@/components/nav'
-import { api, type CategoryPortion, type Preference, type Profile } from '@/lib/api-client'
+import { api, type BodyMetric, type CategoryPortion, type Preference, type Profile } from '@/lib/api-client'
 
 const CATEGORY_LABEL: Record<string, string> = {
   dal_gravy: 'Dal / gravy', dry_sabzi: 'Dry sabzi', rice_grain: 'Rice', flatbread: 'Roti / paratha',
@@ -20,6 +20,10 @@ export function AboutClient() {
   const portions = useQuery({ queryKey: ['portions'], queryFn: api.portions })
   const preferences = useQuery({ queryKey: ['prefs'], queryFn: api.preferences })
   const goals = useQuery({ queryKey: ['goals'], queryFn: () => api.goals() })
+  const bodyMetrics = useQuery({
+    queryKey: ['body-metrics', 'you'],
+    queryFn: () => api.weightHistory({ page_size: 200 }),
+  })
   const logout = useMutation({
     mutationFn: api.logout,
     onSuccess: () => { window.location.href = '/auth/login' },
@@ -45,8 +49,10 @@ export function AboutClient() {
         <Row label="BMR" value={profile?.bmr_kcal ? `${Math.round(profile.bmr_kcal)} kcal` : '—'} note="Mifflin-St Jeor" />
         <Row label="Daily burn" value={profile?.tdee_kcal ? `${Math.round(profile.tdee_kcal * 0.9)}–${Math.round(profile.tdee_kcal * 1.1)} kcal` : '—'} note="estimate, ±10%" />
       </dl>
-      <WeightLogger onLogged={() => {
-        queryClient.invalidateQueries({ queryKey: ['me'] }); queryClient.invalidateQueries({ queryKey: ['goal'] }); queryClient.invalidateQueries({ queryKey: ['goals', 'summary'] })
+      <WeightLogger latest={bodyMetrics.data?.items[0]}
+        latestWaist={bodyMetrics.data?.items.find((item) => item.waist_cm != null)}
+        loading={bodyMetrics.isPending} onLogged={() => {
+        queryClient.invalidateQueries({ queryKey: ['body-metrics'] }); queryClient.invalidateQueries({ queryKey: ['weights'] }); queryClient.invalidateQueries({ queryKey: ['me'] }); queryClient.invalidateQueries({ queryKey: ['goal'] }); queryClient.invalidateQueries({ queryKey: ['goals', 'summary'] })
       }} />
     </section>
 
@@ -165,8 +171,32 @@ function Row({ label, value, note }: { label: string; value: string; note?: stri
   return <div className="flex items-baseline justify-between"><dt style={{ color: 'var(--color-tx2)' }}>{label}</dt><dd className="tabular-nums text-right">{value}{note && <span className="ml-2 text-xs" style={{ color: 'var(--color-tx2)' }}>{note}</span>}</dd></div>
 }
 
-function WeightLogger({ onLogged }: { onLogged: () => void }) {
+function WeightLogger({ latest, latestWaist, loading, onLogged }: {
+  latest?: BodyMetric
+  latestWaist?: BodyMetric
+  loading: boolean
+  onLogged: () => void
+}) {
   const [weight, setWeight] = useState('')
-  const log = useMutation({ mutationFn: () => api.logWeight(Number(weight)), onSuccess: () => { setWeight(''); onLogged() } })
-  return <div className="mt-4"><div className="flex gap-2"><input type="number" min="20" max="400" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="Log today's weight (kg)" className="input flex-1" /><button onClick={() => log.mutate()} disabled={!weight || log.isPending} className="btn-primary px-5">Save</button></div>{log.error && <p className="mt-2 text-xs" style={{ color: 'var(--color-danger)' }}>{log.error.message}</p>}</div>
+  const [waist, setWaist] = useState('')
+  const validWeight = Number.isFinite(Number(weight)) && Number(weight) >= 20 && Number(weight) <= 400
+  const validWaist = !waist || (Number.isFinite(Number(waist)) && Number(waist) >= 20 && Number(waist) <= 300)
+  const log = useMutation({
+    mutationFn: () => api.logWeight(Number(weight), waist ? Number(waist) : undefined),
+    onSuccess: () => { setWeight(''); setWaist(''); onLogged() },
+  })
+  return <div className="mt-5 border-t pt-4" style={{ borderColor: 'var(--color-line)' }}>
+    <h3 className="font-semibold">Log body measurements</h3>
+    <div className="mt-3 grid grid-cols-2 gap-3 rounded-2xl p-3" style={{ background: 'var(--color-surface-soft)' }}>
+      <div><p className="text-xs" style={{ color: 'var(--color-tx2)' }}>Current weight</p><p className="mt-0.5 font-semibold tabular-nums">{loading ? 'Loading…' : latest ? `${latest.weight_kg.toFixed(1)} kg` : 'Not logged'}</p></div>
+      <div><p className="text-xs" style={{ color: 'var(--color-tx2)' }}>Current waist</p><p className="mt-0.5 font-semibold tabular-nums">{loading ? 'Loading…' : latestWaist?.waist_cm == null ? 'Not logged' : `${latestWaist.waist_cm.toFixed(1)} cm`}</p></div>
+    </div>
+    {latest && <p className="mt-2 text-xs" style={{ color: 'var(--color-tx2)' }}>Latest measurement: {latest.measured_on}</p>}
+    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <label className="text-sm">Weight (kg)<input aria-label="Weight (kg)" type="number" min="20" max="400" step="0.1" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder={latest ? latest.weight_kg.toFixed(1) : 'e.g. 72.5'} className="input mt-1" /></label>
+      <label className="text-sm">Waist (cm, optional)<input aria-label="Waist (cm, optional)" type="number" min="20" max="300" step="0.1" inputMode="decimal" value={waist} onChange={(e) => setWaist(e.target.value)} placeholder={latestWaist?.waist_cm == null ? 'e.g. 84' : latestWaist.waist_cm.toFixed(1)} className="input mt-1" /></label>
+    </div>
+    <button onClick={() => log.mutate()} disabled={!validWeight || !validWaist || log.isPending} className="action-button mt-3">{log.isPending ? 'Saving…' : 'Save measurements'}</button>
+    {log.error && <p className="mt-2 text-xs" role="alert" style={{ color: 'var(--color-danger)' }}>{log.error.message}</p>}
+  </div>
 }
