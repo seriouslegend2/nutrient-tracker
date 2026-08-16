@@ -30,6 +30,7 @@ out/
 playwright-report/
 test-results/
 blob-report/
+artifacts/e2e/runtime/
 
 # Supabase local state
 supabase/.branches/

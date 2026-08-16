@@ -195,10 +195,10 @@ function HydrationCard({ target }: { target?: number }) {
   }, {})
 
   return (
-    <section className="card mb-4 p-5">
+    <section aria-labelledby="hydration-heading" className="card mb-4 p-5">
       <div className="flex items-center justify-between">
         <div>
-        <h2 className="text-sm font-medium" style={{ color: 'var(--color-tx2)' }}>
+        <h2 id="hydration-heading" className="text-sm font-medium" style={{ color: 'var(--color-tx2)' }}>
           Water
         </h2>
         <p className="text-lg tabular-nums">{(todayMl / 1000).toFixed(1)} L{target ? ` / ${(target / 1000).toFixed(1)} L` : ''}</p>

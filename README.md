@@ -94,6 +94,7 @@ seeds/seed_dishes.py      optional 61-dish curated starter seed
 | Node.js | 22+ |
 | Supabase CLI | current release |
 | Docker | only for the Postgres integration suite |
+| Playwright Chromium | installed by `make e2e-install` |
 
 The checked-in lockfiles currently resolve FastAPI 0.141.1, Pydantic 2.13.4,
 Supabase Python 2.31.0, LangChain 1.3.15, LangGraph 1.2.11, Next.js 16.3.1,
@@ -204,6 +205,69 @@ Run the repository's normal checks:
 make check
 ```
 
+### Real Hosted Browser E2E
+
+The root Playwright suite exercises real running services and real hosted
+Supabase Auth/PostgREST data. It does not intercept or mock product API calls.
+Agent, conversation, upload, and media-extraction pages are deliberately outside
+the suite. Runtime traces, videos, and JSON results are ignored; named full-page
+screenshots and the final evidence HTML/PDF under `artifacts/` are commit-eligible.
+
+Install Chromium and run schema-independent checks:
+
+```bash
+make e2e-install
+make e2e-check
+```
+
+For a hosted run, start the customer app on `:3000`, dashboard on `:3001`, and
+FastAPI on `:8000`, then export credentials without writing them to a repository
+file:
+
+```bash
+export SUPABASE_URL='https://PROJECT_REF.supabase.co'
+export SUPABASE_SERVICE_ROLE_KEY='...'
+export E2E_EMAIL='kaushal@kookar.in'
+export E2E_PASSWORD='...'
+make e2e
+```
+
+`E2E_CUSTOMER_URL`, `E2E_DASHBOARD_URL`, and `E2E_BACKEND_URL` can override the
+localhost defaults. Application-specific runtime configuration is still required
+by the three services as documented above.
+
+The secure global setup uses Supabase Auth Admin to find or create and confirm
+`E2E_EMAIL`, updates its password to `E2E_PASSWORD`, ensures the application
+identity/customer role, and grants the admin role through service-role
+PostgREST. It also creates a deterministic `+nutrient-e2e-non-admin` auth alias
+with the same supplied password and explicitly removes its admin role for the
+dashboard-denial test. No password or service key is persisted. The primary E2E
+account's `onboarding_completed_at` is reset before each run so required
+onboarding is exercised; use a dedicated test account because the journey also
+creates goals, meals, hydration, weight, profile, and portion records.
+
+Setup probes all required product tables and non-agent RPCs before opening the
+apps. A missing hosted migration fails with the table/RPC and migration filename
+instead of producing misleading browser failures. The optional curated dish
+scenario is reported as skipped when seed rows do not exist; free-text meal
+coverage remains mandatory.
+
+`npm run e2e` is an orchestrator: Playwright's exit code remains authoritative,
+but report generation runs even after setup or scenario failure. It emits
+`artifacts/e2e-report.html` and `artifacts/e2e-report.pdf` with scenario status,
+sanitized environment/project reference, failures, timestamp, and embedded
+screenshots. It never turns a failed hosted run into a passing one.
+
+The checked-in evidence was generated on 2026-08-16 from a successful real run:
+all 14 non-agent scenarios passed in 1.8 minutes, producing 16 named screenshots
+and the 8-page `artifacts/e2e-report.pdf`. The two provisioned auth users were
+deleted after verification.
+
+Normal push and pull-request CI does not access hosted secrets. The
+`workflow_dispatch` input `run_hosted_e2e` opt-in starts all three services only
+after checking the required repository secrets, runs Chromium, and uploads the
+evidence even on failure.
+
 Run the full database suite in the same shape used by CI:
 
 ```bash
@@ -214,7 +278,7 @@ docker stop nt-verify
 ```
 
 On 2026-08-16, that complete suite applied all 12 migrations to an empty
-Supabase-shaped Postgres 17 database and reported `68 passed`. The customer auth
+Supabase-shaped Postgres 17 database and reported `69 passed`. The customer auth
 test suite reported `27 passed`, the dashboard suite reported `22 passed`, and
 `npm audit --omit=dev` reported zero production vulnerabilities in each
 frontend. See `STATUS.html` for the other commands run and the exact boundary of
@@ -245,10 +309,10 @@ that evidence.
 - Frontend types are maintained locally; no generated OpenAPI client/type
   package is checked in.
 - Both frontends have focused Vitest coverage for redirect validation, backend
-  JWT generation, API clients, pagination, and dashboard panel contracts. There
-  is no browser automation suite. Live hosted Supabase email signup/signin,
-  PostgREST, and live OpenAI provider calls require external runtime access and
-  remain verification work.
+  JWT generation, API clients, pagination, and dashboard panel contracts. The
+  checked-in Playwright suite and evidence cover real hosted non-agent browser
+  flows. Self-service email confirmation, direct-client RLS, and live OpenAI
+  provider calls remain separate verification work.
 
 This is a nutrition tracking tool, not medical advice. Safety rules refuse or
 clamp risky goals but do not replace clinical guidance.

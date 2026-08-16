@@ -1,0 +1,17 @@
+{
+  "name": "nutrient-tracker-e2e",
+  "private": true,
+  "scripts": {
+    "e2e": "node e2e/run-hosted.mjs",
+    "e2e:raw": "playwright test --config=e2e/playwright.config.ts",
+    "e2e:list": "playwright test --config=e2e/playwright.config.ts --list",
+    "e2e:report": "node e2e/report/generate-report.mjs",
+    "e2e:check": "tsc --project e2e/tsconfig.json && node --test e2e/report/*.test.mjs && npm run e2e:list",
+    "e2e:install": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -111,10 +111,11 @@ function ManualMealForm({ date, initialSlot, onCancel, onCreated }: {
       portion_unit: grams ? 'g' : portionUnit }),
     onSuccess: onCreated,
   })
-  const invalid = !search.trim() || !portions || Number(portions) <= 0 || (grams !== '' && Number(grams) <= 0)
+  const invalid = !search.trim() || !portions || Number(portions) <= 0 ||
+    (!selectedDish && !grams) || (grams !== '' && Number(grams) <= 0)
 
-  return <section className="card mb-4 p-4">
-    <div className="mb-4 flex items-center justify-between"><h2 className="font-medium">Add manually</h2>
+  return <section aria-labelledby="manual-meal-heading" className="card mb-4 p-4">
+    <div className="mb-4 flex items-center justify-between"><h2 id="manual-meal-heading" className="font-medium">Add manually</h2>
       <button onClick={onCancel} className="text-sm" style={{ color: 'var(--color-tx2)' }}>Close</button></div>
     <div className="grid grid-cols-2 gap-3">
       <label className="text-sm">Date<input value={date} disabled className="input mt-1 opacity-70" /></label>
@@ -149,6 +150,9 @@ function ManualMealForm({ date, initialSlot, onCancel, onCreated }: {
       <label className="text-sm">Exact grams (optional)<input type="number" min="1" value={grams}
         onChange={(e) => setGrams(e.target.value)} placeholder="Use portion default" className="input mt-1" /></label>
     </div>
+    {!selectedDish && search.trim() && <p className="mt-2 text-xs" style={{ color: 'var(--color-tx2)' }}>
+      Exact grams are required for a free-text dish.
+    </p>}
     {create.error && <p className="mt-3 text-sm" role="alert" style={{ color: 'var(--color-danger)' }}>{create.error.message}</p>}
     <button disabled={invalid || create.isPending} onClick={() => create.mutate()}
             className="btn-primary mt-4 w-full disabled:opacity-40">{create.isPending ? 'Adding…' : 'Add meal'}</button>
@@ -187,9 +191,11 @@ function MealRow({ item, onChange }: { item: Meal; onChange: () => void }) {
   })
   const remove = useMutation({ mutationFn: () => api.deleteMeal(item.id), onSuccess: onChange })
 
-  return <div className="border-t py-2 first:border-t-0" style={{ borderColor: 'var(--color-line)' }}>
+  return <article aria-label={item.dish_name} data-meal-id={item.id} className="border-t py-2 first:border-t-0" style={{ borderColor: 'var(--color-line)' }}>
     <button onClick={() => setOpen(!open)} className="flex w-full items-baseline justify-between text-left">
-      <span className="flex-1">{item.dish_name}<span className="ml-2 text-xs" style={{ color: 'var(--color-tx2)' }}>{item.portions} {item.portion_unit}</span></span>
+      <span className="flex-1">{item.dish_name}<span className="ml-2 text-xs" style={{ color: 'var(--color-tx2)' }}>
+        {item.grams == null ? `${item.portions} ${item.portion_unit}` : `${item.grams} g`}
+      </span></span>
       <span className="tabular-nums text-sm" style={{ color: unknown ? 'var(--color-warn)' : undefined }}>
         {unknown ? 'unknown' : `${Math.round(item.nutrients.calories_kcal ?? 0)} kcal`}</span>
     </button>
@@ -209,5 +215,5 @@ function MealRow({ item, onChange }: { item: Meal; onChange: () => void }) {
         <button disabled={remove.isPending} onClick={() => window.confirm(`Remove ${item.dish_name}?`) && remove.mutate()} style={{ color: 'var(--color-danger)' }}>{remove.isPending ? 'Removing…' : 'Remove'}</button></div>}
       {remove.error && <p className="mt-2" style={{ color: 'var(--color-danger)' }}>{remove.error.message}</p>}
     </div>}
-  </div>
+  </article>
 }

@@ -3,6 +3,13 @@ name: CI
 on:
   push: { branches: [main] }
   pull_request:
+  workflow_dispatch:
+    inputs:
+      run_hosted_e2e:
+        description: Run destructive-to-the-E2E-account hosted browser journeys
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   migrations:
@@ -103,3 +110,68 @@ jobs:
       - run: cd ${{ matrix.app }} && npm run test
       - run: cd ${{ matrix.app }} && npm run typecheck
       - run: cd ${{ matrix.app }} && npm run build
+
+  e2e-static:
+    name: E2E static and report checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run e2e:check
+
+  hosted-e2e:
+    name: Hosted Playwright E2E
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_hosted_e2e }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+      BACKEND_JWT_SECRET: ${{ secrets.BACKEND_JWT_SECRET }}
+      JWT_SECRET_KEY: ${{ secrets.BACKEND_JWT_SECRET }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      BACKEND_API_URL: http://127.0.0.1:8000
+      E2E_CUSTOMER_URL: http://127.0.0.1:3000
+      E2E_DASHBOARD_URL: http://127.0.0.1:3001
+      E2E_BACKEND_URL: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Require hosted E2E secrets
+        run: |
+          for name in SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY SUPABASE_ANON_KEY E2E_EMAIL E2E_PASSWORD BACKEND_JWT_SECRET; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required GitHub Actions secret: $name"
+              exit 1
+            fi
+          done
+      - run: cd backend && uv sync --all-extras
+      - run: cd customer-app && npm ci
+      - run: cd internal-dashboard && npm ci
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Start real services
+        run: |
+          (cd backend && uv run uvicorn app.main:app --host 127.0.0.1 --port 8000) > /tmp/nutrient-backend.log 2>&1 &
+          (cd customer-app && npm run dev) > /tmp/nutrient-customer.log 2>&1 &
+          (cd internal-dashboard && npm run dev) > /tmp/nutrient-dashboard.log 2>&1 &
+      - name: Run hosted E2E and always build evidence PDF
+        run: npm run e2e
+      - name: Upload hosted E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hosted-e2e-evidence
+          if-no-files-found: warn
+          path: |
+            artifacts/e2e-report.html
+            artifacts/e2e-report.pdf
+            artifacts/e2e/screenshots/

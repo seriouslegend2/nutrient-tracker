@@ -118,8 +118,10 @@ unchecked.
 - [x] Mypy passes for the strict scope configured in `Makefile` and CI.
 - [x] All four import-linter contracts pass.
 - [x] Add focused frontend unit coverage for auth redirects, backend JWTs, API
-  clients, pagination, and panel contracts; browser automation remains external
-  verification work. `(scoped in docs)`
+  clients, pagination, and panel contracts.
+- [x] Add real Playwright infrastructure for all non-agent customer and dashboard
+  journeys, secure hosted-user provisioning, stable screenshots, and failure PDF
+  evidence. The real hosted execution passed all 14 scenarios.
 - [x] Update stack versions, migration count, seed size, and verification results.
 - [x] Reconcile `README.md`, `PLAN.html`, `STATUS.html`, and `DAG.md` with the
   current implementation.
@@ -130,43 +132,47 @@ unchecked.
 
 The following commands completed locally on 2026-08-16:
 
-- Ruff check and format check: pass; 74 files already formatted.
+- Ruff check and format check: pass; 75 files already formatted.
 - Configured mypy scope: pass with no issues in 12 source files.
 - Import-linter: 4 contracts kept, 0 broken across 64 analyzed files.
-- Full pytest run with required pgvector/Postgres 17 database: `68 passed in
-  9.06s`; no skips; all 12 migrations applied from empty.
+- Full pytest run with required pgvector/Postgres 17 database: `69 passed in
+  10.21s`; no skips; all 12 migrations applied from empty.
 - Customer application: TypeScript pass and Next.js production build pass.
 - Internal dashboard: TypeScript pass and Next.js production build pass.
 - Customer auth Vitest suite: 27 passed; dashboard Vitest suite: 22 passed.
+- Root E2E strict TypeScript check passed, evidence-report tests reported `3
+  passed`, and Playwright statically discovered 14 hosted Chromium scenarios.
+- Playwright Chromium completed the real hosted non-agent suite against Supabase
+  Auth/PostgREST and all three local services: `14 passed` in 1.8 minutes, with
+  16 named screenshots and an 8-page HTML/PDF evidence report.
 - Both frontend production dependency audits: 0 vulnerabilities after the
   Next.js 16.3.1 upgrade.
 - Frontend isolation script: pass.
 
-These are local parity commands, not evidence that a GitHub Actions run or a
-hosted deployment succeeded.
+These are local command results, including a local browser run against hosted
+Supabase. They are not evidence that a GitHub Actions run or hosted application
+deployment succeeded.
 
-## Externally Blocked Verification
+## External Verification
 
 - [ ] Rotate the exposed Supabase service-role key, generate a replacement
   shared JWT secret, and replace the local placeholders. Blocker: credential
   rotation and secret delivery must be completed by a Supabase project operator.
-- [ ] Apply the 12 migrations to a real hosted Supabase project and exercise
-  PostgREST, the `auth.users` bootstrap trigger, real JWT claims, and row-level
-  policy behavior. Blocker: no linked project or Supabase credentials were
-  available. The local suite uses Supabase-shaped Postgres stubs and does not
-  prove hosted behavior.
-- [ ] Enable the Supabase Email provider and complete live hosted customer
-  email/password signup and signin. If email confirmations are enabled, also
-  allow and exercise `http://localhost:3000/auth/callback`; otherwise no
-  callback verification is needed. The sign-in-only dashboard never needs a
-  callback. Blocker: hosted authentication has not been exercised.
-- [ ] Complete dashboard sign-in/logout, denial without the `admin` role, and
-  access after an operator grants that role in `user_roles`. Blocker: this
-  depends on the hosted account and role grant above.
+- [x] Apply all 12 migrations and the optional 61-dish seed to hosted Supabase;
+  validate required tables/RPCs through service-role PostgREST and exercise real
+  Supabase sessions plus BFF-issued user JWTs.
+- [x] Enable the Supabase Email provider and complete hosted customer and
+  dashboard email/password signin. Self-service signup and the confirmation
+  callback remain unverified because E2E securely provisions confirmed users.
+- [x] Complete dashboard sign-in/logout, denial without the `admin` role, and
+  access after setup grants the role in `user_roles`.
+- [ ] Verify direct authenticated-client own-row RLS behavior separately. The
+  shipped BFF architecture intentionally performs product database calls with
+  the backend service role.
 - [ ] Exercise live OpenAI calls for `nutrition_chat` and `media_extraction`
   across image, label-hinted image, audio, and PDF inputs. Blocker: no provider
   API credential was used; current evidence covers code paths with mocked
   provider output only.
-- [ ] Drive the complete browser signup/onboarding/meal/report/admin flow against
-  those external services. Blocker: it depends on the unverified hosted
-  Supabase email authentication above, and no browser suite is checked in.
+- [x] Drive the checked-in non-agent Playwright login/onboarding/goal/meal/water/
+  report/profile/admin suite against hosted Supabase and all three configured
+  services: 14 passed with screenshot and PDF evidence.

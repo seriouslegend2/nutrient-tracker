@@ -1,4 +1,4 @@
-.PHONY: help setup dev backend customer dashboard migrate seed test frontend-test lint typecheck check
+.PHONY: help setup dev backend customer dashboard migrate seed test frontend-test lint typecheck check e2e-install e2e-list e2e-check e2e
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -7,6 +7,7 @@ setup:  ## Install everything and link the Supabase project
 	cd backend && uv sync
 	cd customer-app && npm install
 	cd internal-dashboard && npm install
+	npm install
 	@echo "Now: supabase link --project-ref YOUR_REF && make migrate"
 
 migrate:  ## Push migrations to Supabase
@@ -44,3 +45,16 @@ typecheck:  ## Type-check strict backend boundaries and both frontends
 check: lint typecheck test frontend-test  ## Local CI parity checks
 	cd backend && uv run lint-imports
 	@bash scripts/check-frontend-isolation.sh
+
+e2e-install:  ## Install the root E2E package and Playwright Chromium
+	npm install
+	npm run e2e:install
+
+e2e-list:  ## Statically discover hosted E2E scenarios (no secrets/services needed)
+	npm run e2e:list
+
+e2e-check:  ## Test the report code and statically discover browser scenarios
+	npm run e2e:check
+
+e2e:  ## Run real hosted E2E and always generate an evidence PDF
+	npm run e2e

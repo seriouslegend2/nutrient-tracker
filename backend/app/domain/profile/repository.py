@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from app.services.supabase import call_rpc, get_supabase
+from app.services.supabase import call_rpc, get_supabase, serialise
 from app.utils.logger import logger
 
 _ACTIVE = "is_active"
@@ -57,7 +57,7 @@ async def get_profile(user_id: str) -> dict[str, Any] | None:
 
 async def upsert_profile(user_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     sb = await get_supabase()
-    payload = {k: v for k, v in patch.items() if v is not None}
+    payload = serialise({k: v for k, v in patch.items() if v is not None})
     payload["user_id"] = user_id
     res = await sb.table("user_profiles").upsert(payload, on_conflict="user_id").execute()
     # A database trigger refreshes derived columns without exposing them for

@@ -53,7 +53,7 @@ async def get_supabase() -> AsyncClient:
     return _client
 
 
-def _serialise(value: Any) -> Any:
+def serialise(value: Any) -> Any:
     """PostgREST speaks JSON; UUIDs, dates and Decimals do not serialise natively."""
     if isinstance(value, UUID):
         return str(value)
@@ -62,9 +62,9 @@ def _serialise(value: Any) -> Any:
     if isinstance(value, Decimal):
         return float(value)
     if isinstance(value, dict):
-        return {k: _serialise(v) for k, v in value.items()}
+        return {k: serialise(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_serialise(v) for v in value]
+        return [serialise(v) for v in value]
     return value
 
 
@@ -75,7 +75,7 @@ async def call_rpc(
     schema: str | None = None,
 ) -> Any:
     client = await get_supabase()
-    payload = {k: _serialise(v) for k, v in (params or {}).items()}
+    payload = {k: serialise(v) for k, v in (params or {}).items()}
     try:
         builder = client.schema(schema) if schema else client
         result = await builder.rpc(function_name, payload).execute()
