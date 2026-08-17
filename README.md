@@ -1,7 +1,10 @@
 # Nutrient Tracker
 
+-------------------------------------------
+
 **Demo video:** [Watch on YouTube](https://youtu.be/iMKGnQBu9dc) · [Backup on Google Drive](https://drive.google.com/file/d/1cJqmfmqPshf8M0nfz8Ci_6Cw4LRsZ-PK/view?usp=drive_link)
 
+------------------------------------------
 Nutrient Tracker is a multi-user nutrition tracker with:
 
 - a FastAPI backend on port `8000`;
