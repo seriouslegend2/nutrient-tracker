@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { createClient } from '@/lib/supabase/server'
-import { safeRedirectPath } from '@/lib/auth'
+import { publicOrigin, safeRedirectPath } from '@/lib/auth'
 
 /** Exchanges a PKCE confirmation code server-side and sets httpOnly cookies. */
 export async function GET(request: NextRequest) {
@@ -11,9 +11,10 @@ export async function GET(request: NextRequest) {
   if (code) {
     const supabase = await createClient()
     const { error } = await supabase.auth.exchangeCodeForSession(code)
-    if (!error) return NextResponse.redirect(new URL(next, request.url))
+    if (!error) return NextResponse.redirect(new URL(next, publicOrigin(request)))
+    console.error('[auth] exchangeCodeForSession failed', error)
   }
-  const login = new URL('/auth/login', request.url)
+  const login = new URL('/auth/login', publicOrigin(request))
   login.searchParams.set('error', 'auth_failed')
   login.searchParams.set('next', next)
   return NextResponse.redirect(login)

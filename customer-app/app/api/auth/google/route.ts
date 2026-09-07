@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { safeRedirectPath } from '@/lib/auth'
+import { publicOrigin, safeRedirectPath } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 
 export async function GET(request: NextRequest) {
   const next = safeRedirectPath(request.nextUrl.searchParams.get('next'))
-  const callback = new URL('/auth/callback', request.nextUrl.origin)
+  const callback = new URL('/auth/callback', publicOrigin(request))
   callback.searchParams.set('next', next)
 
   const supabase = await createClient()
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
   })
 
   if (error || !data.url) {
-    const login = new URL('/auth/login', request.url)
+    const login = new URL('/auth/login', publicOrigin(request))
     login.searchParams.set('error', 'google_auth_failed')
     login.searchParams.set('next', next)
     return NextResponse.redirect(login)

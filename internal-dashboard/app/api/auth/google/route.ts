@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { safeNext } from '@/lib/auth'
+import { publicOrigin, safeNext } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 
 function loginRedirect(request: NextRequest, next: string, error: string) {
-  const login = new URL('/auth/login', request.url)
+  const login = new URL('/auth/login', publicOrigin(request))
   login.searchParams.set('error', error)
   login.searchParams.set('next', next)
   return NextResponse.redirect(login)
@@ -12,7 +12,7 @@ function loginRedirect(request: NextRequest, next: string, error: string) {
 
 export async function GET(request: NextRequest) {
   const next = safeNext(request.nextUrl.searchParams.get('next'))
-  const callback = new URL('/auth/callback', request.nextUrl.origin)
+  const callback = new URL('/auth/callback', publicOrigin(request))
   callback.searchParams.set('next', next)
 
   try {
