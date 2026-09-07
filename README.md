@@ -5,6 +5,14 @@
 **Demo video:** [Watch on YouTube](https://youtu.be/iMKGnQBu9dc) · [Backup on Google Drive](https://drive.google.com/file/d/1cJqmfmqPshf8M0nfz8Ci_6Cw4LRsZ-PK/view?usp=drive_link)
 
 ------------------------------------------
+
+**Live deployment (Railway):**
+
+- Backend API: https://backend-production-469c9.up.railway.app
+- Customer app: https://customer-app-production-76f8.up.railway.app
+- Internal dashboard: https://internal-dashboard-production-ac6f.up.railway.app
+
+------------------------------------------
 Nutrient Tracker is a multi-user nutrition tracker with:
 
 - a FastAPI backend on port `8000`;
